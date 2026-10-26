@@ -7,6 +7,17 @@ const [runtimeArg, ...rootArgs] = process.argv.slice(2);
 if (!runtimeArg || !rootArgs.length) throw new Error('Usage: node bundle-macos-libraries.mjs <runtime-dir> <root-relative-path>...');
 const runtime = path.resolve(runtimeArg);
 const roots = rootArgs.map(value => path.resolve(runtime, value));
+function collectDylibs(folder) {
+  const files = [];
+  if (!fs.existsSync(folder)) return files;
+  for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+    const filename = path.join(folder, entry.name);
+    if (entry.isDirectory()) files.push(...collectDylibs(filename));
+    else if (entry.isFile() && entry.name.toLowerCase().includes('.dylib')) files.push(filename);
+  }
+  return files;
+}
+for (const filename of collectDylibs(path.join(runtime, 'lib'))) if (!roots.includes(filename)) roots.push(filename);
 const queue = roots.map(filename => ({ source: fs.realpathSync(filename), target: filename }));
 const visited = new Set();
 
