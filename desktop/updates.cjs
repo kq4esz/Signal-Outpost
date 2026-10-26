@@ -79,11 +79,11 @@ function createUpdates({ getWindow, dataDir, beforeInstall, onStatus = () => {} 
   }
   async function check(manual = false) {
     if (!supportsAutomaticUpdates) {
-      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: 'Install Linux updates from GitHub Releases.', detail: 'Choose the package for your Linux desktop from https://github.com/kq4esz/SDRExtreme/releases/latest.' });
+      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: process.platform === 'darwin' ? 'Install macOS updates from GitHub Releases.' : 'Install Linux updates from GitHub Releases.', detail: 'Choose the package for your desktop from https://github.com/kq4esz/SDRExtreme/releases/latest.' });
       return;
     }
     if (!app.isPackaged) {
-      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: 'Automatic updates run in the installed Windows application.', detail: 'Install the Windows setup executable from GitHub Releases.' });
+      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: 'Automatic updates run in the installed Windows application.', detail: `Install the ${process.platform === 'darwin' ? 'macOS' : 'Windows'} package from GitHub Releases.` });
       return;
     }
     if (disposed || installing) return;

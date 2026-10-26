@@ -66,6 +66,16 @@ linux:
     entry:
       Comment: RTL-SDR receiver, scanner, and MeshCore companion client
       Categories: AudioVideo;Network;Utility;
+mac:
+  target: [dmg, zip]
+  icon: assets/mac-app-icon.icns
+  artifactName: Signal-Outpost-${version}-${arch}.${ext}
+  category: public.app-category.utilities
+  darkModeSupport: true
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSBluetoothAlwaysUsageDescription: Signal Outpost uses Bluetooth to connect to MeshCore radios.
 pacman:
   packageName: signal-outpost
   compression: zstd

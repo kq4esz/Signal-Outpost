@@ -1,6 +1,6 @@
 {
   "name": "sdr-extreme",
-  "version": "0.16.16",
+  "version": "0.16.17",
   "private": true,
   "type": "module",
   "description": "Amateur radio and scanner desktop suite with RTL-SDR USB, HD Radio, digital decoders, KiwiSDR and MeshCore.",
@@ -30,9 +30,13 @@
     "build:linux": "pnpm build:themes && pnpm build:native:linux && electron-builder --linux AppImage tar.gz --x64 --publish never",
     "build:linux:dir": "pnpm build:themes && pnpm build:native:linux && electron-builder --linux --x64 --dir --publish never",
     "build:arch": "pnpm build:themes && pnpm build:native:linux && electron-builder --linux pacman --x64 --publish never",
+    "build:native:mac": "bash scripts/build-macos-native-decoders.sh",
+    "build:mac:x64": "pnpm build:themes && node scripts/build-mac-icon.mjs && SDR_EXTREME_MAC_ARCH=x64 pnpm build:native:mac && electron-builder --mac dmg zip --x64 --publish never",
+    "build:mac:arm64": "pnpm build:themes && node scripts/build-mac-icon.mjs && SDR_EXTREME_MAC_ARCH=arm64 pnpm build:native:mac && electron-builder --mac dmg zip --arm64 --publish never",
     "release:win": "pnpm build:win && pnpm release:checksums && node scripts/publish-release.mjs",
     "release:checksums": "node scripts/release-checksums.mjs",
-    "release:checksums:linux": "node scripts/release-checksums.mjs --linux"
+    "release:checksums:linux": "node scripts/release-checksums.mjs --linux",
+    "release:checksums:mac": "node scripts/release-checksums.mjs --mac"
   },
   "dependencies": {
     "@liamcottle/meshcore.js": "1.15.0",
@@ -44,6 +48,8 @@
   },
   "optionalDependencies": {
     "@koromix/koffi-linux-x64": "3.3.3",
+    "@koromix/koffi-darwin-arm64": "3.3.3",
+    "@koromix/koffi-darwin-x64": "3.3.3",
     "@koromix/koffi-win32-x64": "3.3.3"
   },
   "devDependencies": {

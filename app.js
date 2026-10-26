@@ -884,7 +884,7 @@ async function refreshUsbDevices() {
     const saved=state.usbDevices.find(device=>device.serial&&device.serial===state.settings.deviceSerial)||state.usbDevices.find(device=>device.index===Number(state.settings.deviceIndex));
     if(saved)select.value=String(saved.index);
     message.classList.toggle('ready',data.available&&state.usbDevices.length>0);message.classList.toggle('error',!data.available);
-    message.textContent=!data.available?data.error:state.usbDevices.length?`${state.usbDevices.length} RTL-SDR USB receiver${state.usbDevices.length===1?'':'s'} detected · native library ready`:state.platform==='linux'?'Native library ready. Plug in your RTL-SDR and use Refresh. If no device appears, check USB permissions.':'Native library ready. Plug in your RTL-SDR and use Refresh. If needed, install WinUSB for Interface 0.';
+    message.textContent=!data.available?data.error:state.usbDevices.length?`${state.usbDevices.length} RTL-SDR USB receiver${state.usbDevices.length===1?'':'s'} detected · native library ready`:state.platform==='linux'?'Native library ready. Plug in your RTL-SDR and use Refresh. If no device appears, check USB permissions.':state.platform==='darwin'?'Native library ready. Plug in your RTL-SDR and use Refresh. Close other SDR applications if the dongle is claimed.':'Native library ready. Plug in your RTL-SDR and use Refresh. If needed, install WinUSB for Interface 0.';
     $('#usb-library-info').textContent=data.libraryPath?`Loaded library: ${data.libraryPath}`:'No native RTL-SDR library loaded.';
     renderUsbDevice();
   }catch(error){message.classList.add('error');message.textContent=error.message;}
@@ -927,13 +927,13 @@ async function refreshState() {
   if(!state.scanSelectionLoaded){state.scanSelection=new Set(state.settings.scanChannelIds||[]);state.scanSelectionLoaded=true;}
   state.scanSelection=new Set([...state.scanSelection].filter(id=>state.channels.some(channel=>channel.id===id&&(channel.kind==='trunked'||(channel.mode!=='HD'&&channel.enabled!==false)))));
   $('#rtl-library-path').value=state.settings.rtlLibraryPath||'';$('#dsd-path').value=state.settings.dsdPath||'';$('#sample-rate').value=String(state.settings.sampleRate||2400000);
-  const linux=state.platform==='linux';
-  $('#rtl-hardware-help').textContent=linux?'Uses the app’s pinned Blog V4-compatible driver for RTL-SDR V1–V4. Configure USB access permissions for your user account.':'Connect directly to your dongle through the native RTL-SDR library. Choose a device below and start listening.';
+  const linux=state.platform==='linux',mac=state.platform==='darwin';
+  $('#rtl-hardware-help').textContent=linux?'Uses the app’s pinned Blog V4-compatible driver for RTL-SDR V1–V4. Configure USB access permissions for your user account.':mac?'Uses the app’s bundled V1–V4-compatible RTL-SDR driver. Connect the dongle directly and close any other SDR app that may own it.':'Connect directly to your dongle through the native RTL-SDR library. Choose a device below and start listening.';
   $('#rtl-library-label').textContent='CUSTOM RTL-SDR LIBRARY (OPTIONAL)';
-  $('#rtl-library-path').placeholder=linux?'Bundled V1–V4 driver · custom .so override optional':'Bundled Blog V4-compatible x64 rtlsdr.dll';
-  $('#rtl-permissions-help').textContent=linux?'Linux setup: configure USB device permissions as described in the README. The release includes the native RTL-SDR driver. Do not run the desktop app as root.':'Windows setup: install WinUSB for the dongle’s Bulk-In Interface 0.';
-  $('#rtl-setup-link').classList.toggle('hidden',linux);
-  if(linux){$('#digital-engine').options[0].textContent='Integrated DSD-neo';$('#dsd-path').placeholder='/usr/bin/dsd-fme';}
+  $('#rtl-library-path').placeholder=linux?'Bundled V1–V4 driver · custom .so override optional':mac?'Bundled V1–V4 driver · custom .dylib override optional':'Bundled Blog V4-compatible x64 rtlsdr.dll';
+  $('#rtl-permissions-help').textContent=linux?'Linux setup: configure USB device permissions as described in the README. The release includes the native RTL-SDR driver. Do not run the desktop app as root.':mac?'macOS uses the bundled native driver. If the dongle is not detected, quit other SDR applications and reconnect it.':'Windows setup: install WinUSB for the dongle’s Bulk-In Interface 0.';
+  $('#rtl-setup-link').classList.toggle('hidden',linux||mac);
+  if(linux||mac){$('#digital-engine').options[0].textContent='Integrated DSD-neo';$('#dsd-path').placeholder=mac?'/opt/homebrew/bin/dsd-neo':'/usr/bin/dsd-fme';}
   $('#digital-engine').value=state.settings.digitalEngine||'integrated';$('#external-decoder-fields').classList.toggle('hidden',$('#digital-engine').value!=='external');
   $('#usb-ppm').value=state.settings.ppm||0;$('#usb-sampling').value=String(state.settings.directSampling||0);$('#usb-bandwidth').value=String(state.settings.tunerBandwidth||0);
   $('#usb-agc').checked=Boolean(state.settings.rtlAgc);$('#usb-bias').checked=Boolean(state.settings.biasTee);$('#usb-tuner-auto').checked=!state.settings.tunerGain;

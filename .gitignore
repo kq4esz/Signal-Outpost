@@ -3,6 +3,10 @@ local-data/
 dist/
 native/digital/linux-x64/
 native/hd-radio/linux-x64/
+native/digital/darwin-*/
+native/hd-radio/darwin-*/
+assets/mac-app-icon.icns
+assets/mac-app-icon.iconset/
 *.pem
 *.pfx
 *.p12

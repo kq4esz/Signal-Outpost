@@ -36,10 +36,14 @@ if (remoteCommit.sha !== commit) throw new Error('The pushed release tag does no
 const out = path.join(root, 'dist');
 const installer = `Signal-Outpost-Setup-${pkg.version}-x64.exe`;
 const linuxPackages = fs.readdirSync(out).filter(name => /\.(AppImage|tar\.gz|pkg\.tar\.zst)$/i.test(name)).sort();
+const macPackages = fs.readdirSync(out).filter(name => /\.(dmg|zip)$/i.test(name)).sort();
 if (linuxPackages.length && (!linuxPackages.some(name => name.toLowerCase().endsWith('.appimage')) || !linuxPackages.some(name => name.endsWith('.tar.gz')) || !linuxPackages.some(name => name.endsWith('.pkg.tar.zst')) || !fs.existsSync(path.join(out, 'SHA256SUMS-linux.txt')))) {
   throw new Error('A Linux release must include the AppImage, tar.gz, Arch pacman package, and SHA256SUMS-linux.txt.');
 }
-const names = [installer, `${installer}.blockmap`, 'latest.yml', 'SHA256SUMS.txt', ...linuxPackages, ...(linuxPackages.length ? ['SHA256SUMS-linux.txt'] : [])];
+if (macPackages.length && (!macPackages.some(name => name.endsWith('-x64.dmg')) || !macPackages.some(name => name.endsWith('-x64.zip')) || !macPackages.some(name => name.endsWith('-arm64.dmg')) || !macPackages.some(name => name.endsWith('-arm64.zip')) || !fs.existsSync(path.join(out, 'SHA256SUMS-mac.txt')))) {
+  throw new Error('A macOS release must include x64 and arm64 DMG and ZIP packages, plus SHA256SUMS-mac.txt.');
+}
+const names = [installer, `${installer}.blockmap`, 'latest.yml', 'SHA256SUMS.txt', ...linuxPackages, ...(linuxPackages.length ? ['SHA256SUMS-linux.txt'] : []), ...macPackages, ...(macPackages.length ? ['SHA256SUMS-mac.txt'] : [])];
 for (const name of names) if (!fs.statSync(path.join(out, name)).isFile()) throw new Error(`Missing release file: ${name}`);
 const manifest = fs.readFileSync(path.join(out, 'latest.yml'), 'utf8');
 if (!manifest.includes(`version: ${pkg.version}`) || !manifest.includes(installer)) throw new Error('The update manifest does not match the Windows installer.');
@@ -47,7 +51,7 @@ const localSha512 = createHash('sha512').update(fs.readFileSync(path.join(out, i
 if (!manifest.includes(localSha512)) throw new Error('The installer SHA-512 does not match latest.yml. Rebuild before publishing.');
 const notesFile = path.join(root, 'docs', 'releases', `${pkg.version}.md`);
 const defaultNotes = linuxPackages.length
-  ? `Signal Outpost ${pkg.version} for Windows x64, Linux x64, and Arch Linux x86_64. Download the Windows installer, Linux AppImage / tar.gz, or Arch pacman package. Windows installations receive updates automatically.`
+  ? `Signal Outpost ${pkg.version} for Windows x64, Linux x64, Arch Linux x86_64, and macOS x64 / Apple silicon. Download the Windows installer, Linux AppImage / tar.gz, Arch pacman package, or macOS DMG / ZIP. Windows installations receive updates automatically. The macOS app is unsigned and requires the first-launch confirmation described in the README.`
   : `Windows x64 release of Signal Outpost ${pkg.version}. Download and run ${installer}. Installed applications receive this version automatically.`;
 const notes = fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf8') : defaultNotes;
 const existing = (await api('/releases?per_page=100')).find(release => release.tag_name === tag);

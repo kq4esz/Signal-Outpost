@@ -1,10 +1,10 @@
 # RTL-SDR native USB libraries
 
-Linux x64 packages use one private, pinned RTL-SDR 2.0.3 library for live
+Linux x64 and macOS x64/arm64 packages use a private, pinned RTL-SDR 2.0.3 library for live
 analog, HD Radio and integrated DSD-neo reception. It includes RTL-SDR Blog V4
 and V4 Lite support and is backward-compatible with Blog V3 and older or other
 compatible RTL2832U dongles. Its source commit is pinned in
-`native/digital/source/dsd-neo-32ae7c8.zip`; see the Linux runtime build notes
+`native/digital/source/dsd-neo-32ae7c8.zip`; see the platform runtime build notes
 in `native/digital/README.md`. The application selects this library by default;
 an explicit library path or `RTLSDR_LIBRARY` environment variable overrides it.
 USB device access still follows the distribution's udev rules and permissions.

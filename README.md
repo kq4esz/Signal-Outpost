@@ -2,7 +2,7 @@
 
 *Tune. Decode. Connect.*
 
-Signal Outpost is an Electron desktop receiver suite with native RTL-SDR USB access, a worldwide KiwiSDR receiver map, scanner memories, digital decoding integrations, and a MeshCore companion client. Windows and Linux x64 builds include the bundled HD Radio and DSD-neo decoders.
+Signal Outpost is an Electron desktop receiver suite with native RTL-SDR USB access, a worldwide KiwiSDR receiver map, scanner memories, digital decoding integrations, and a MeshCore companion client. Windows and Linux x64 builds include the bundled HD Radio and DSD-neo decoders. macOS packages are built for Intel and Apple silicon with the same receiver and decoder features.
 
 ## Linux desktop packages
 
@@ -31,6 +31,18 @@ sudo pacman -U ./Signal-Outpost-*.pkg.tar.zst
 
 The tagged GitHub release workflow builds the generic Linux packages on Ubuntu and the Arch package on Arch Linux, then publishes them with the Windows installer.
 
+## macOS desktop packages
+
+macOS releases include separate Intel x64 and Apple silicon arm64 **DMG** and **ZIP** downloads. They include the pinned RTL-SDR driver, HD Radio and DSD-neo native runtimes, so live reception uses direct USB just as it does on Linux. Use the package that matches the Mac's processor. The app uses Electron 44 and requires **macOS 13 Ventura or later**.
+
+These initial Mac packages are not signed or notarized. The first time macOS blocks the app, open **System Settings → Privacy & Security**, scroll to Security, and choose **Open Anyway** for Signal Outpost; review the warning and confirm **Open**. This confirmation is needed once per installed release. See [Apple's instructions](https://support.apple.com/en-gb/102445). Mac updates are manual: download the newer DMG from GitHub Releases and replace the app in Applications. Memories and settings remain in the user's macOS application-support folder.
+
+USB access does not use Linux udev rules or a Windows WinUSB driver. Connect the RTL-SDR directly and close other SDR applications if they already have the device open. The app bundles its RTL-SDR driver; a custom compatible `.dylib` can be selected in Hardware settings. Bluetooth LE depends on macOS Bluetooth permission and the system Bluetooth stack.
+
+To build locally, use a Mac with Xcode command-line tools, Homebrew, Node.js 22.12 or newer, pnpm 11.25.0, and Homebrew's `autoconf automake cmake fftw libao libsndfile libtool libusb ninja pkg-config` packages. Run `pnpm install --frozen-lockfile`, then use `pnpm build:mac:x64` on Intel or `pnpm build:mac:arm64` on Apple silicon. The native decoder build is compiled on the matching architecture and writes a DMG and ZIP under `dist/`.
+
+The tagged GitHub release workflow builds both Mac architectures alongside Windows and Linux, then publishes their DMG/ZIP files and `SHA256SUMS-mac.txt` together. No Apple signing credentials are configured, so first-launch approval remains required.
+
 ## Upgrading from SDR Extreme
 
 **Signal Outpost 0.11.0** continues the SDR Extreme project under its new name.
@@ -48,16 +60,16 @@ old name. No profile move or uninstall is required.
 
 ## Start the app
 
-1. On Windows, download the current **Signal-Outpost-Setup** installer from [GitHub Releases](https://github.com/kq4esz/SDRExtreme/releases/latest), run the installer, then launch **Signal Outpost** from the desktop or Start menu. The installer includes Electron, the local service, USB libraries and decoders; Node.js is not required. Linux users can choose the AppImage or tar.gz package; Arch users can install the `.pkg.tar.zst` release package with `pacman -U`.
+1. On Windows, download the current **Signal-Outpost-Setup** installer from [GitHub Releases](https://github.com/kq4esz/SDRExtreme/releases/latest), run the installer, then launch **Signal Outpost** from the desktop or Start menu. The installer includes Electron, the local service, USB libraries and decoders; Node.js is not required. Linux users can choose the AppImage or tar.gz package; Arch users can install the `.pkg.tar.zst` release package with `pacman -U`. Mac users should choose the matching x64 or arm64 DMG, move Signal Outpost to Applications, then use the one-time **Privacy & Security → Open Anyway** approval if Gatekeeper blocks first launch.
 2. Open **Settings → RTL-SDR device manager**. Click **Refresh**, select your attached receiver, and save the hardware settings.
 3. Go to **Live radio** and click **Start listening**. Select a memory or tune to a frequency.
 4. Go to **KiwiSDR network** to choose a receiver on the world map or in the station list. Select a station, then click **Check & listen**. Its listening interface opens inside the app; **Open receiver in a new window** offers a dedicated desktop window if a receiver blocks embedding.
 
 For a fresh source checkout, install Node.js **22.12 or newer**, then run `setup-signal-outpost.cmd`. It installs the JavaScript dependencies and desktop runtime. The driver DLLs under `native/win32-x64` must accompany the app. The setup script can also use the bundled Codex Node runtime on this PC.
 
-Windows installs save memory channels, preferences, the receiver directory and window size in **`%APPDATA%\SDR Extreme\data`**. Linux installs use Electron’s platform-native **`~/.config/Signal Outpost/data`** profile. Updates preserve this data. **Help → Open saved data folder** opens it. Source checkouts continue to use the ignored `local-data` folder. To migrate from a source checkout, close both versions and copy `channels.json` and `settings.json` from `local-data` into the installed build's data folder; keep a backup before replacing an existing profile. Closing the desktop app releases its receiver. In a source checkout, `stop-signal-outpost.cmd` also stops the local service.
+Windows installs save memory channels, preferences, the receiver directory and window size in **`%APPDATA%\SDR Extreme\data`**. Linux installs use Electron’s platform-native **`~/.config/Signal Outpost/data`** profile; macOS uses **`~/Library/Application Support/Signal Outpost/data`**. Updates preserve this data. **Help → Open saved data folder** opens it. Source checkouts continue to use the ignored `local-data` folder. To migrate from a source checkout, close both versions and copy `channels.json` and `settings.json` from `local-data` into the installed build's data folder; keep a backup before replacing an existing profile. Closing the desktop app releases its receiver. In a source checkout, `stop-signal-outpost.cmd` also stops the local service.
 
-The local UI service uses `127.0.0.1:17890` for the desktop interface and audio/waterfall display. **RTL-SDR hardware access is direct USB through a native RTL-SDR library, with no RTL-TCP process or port 1234 requirement.** Windows uses the bundled V4-compatible `rtlsdr.dll` and WinUSB; Linux uses the bundled pinned V4-compatible library and udev permissions. MeshCore separately supports USB serial, Bluetooth LE and its companion TCP connection over Wi-Fi. `launch-browser-console.cmd` is an optional Windows browser interface to the same native USB backend.
+The local UI service uses `127.0.0.1:17890` for the desktop interface and audio/waterfall display. **RTL-SDR hardware access is direct USB through a native RTL-SDR library, with no RTL-TCP process or port 1234 requirement.** Windows uses the bundled V4-compatible `rtlsdr.dll` and WinUSB; Linux uses the bundled pinned V4-compatible library and udev permissions; macOS uses its architecture-matched bundled driver and native USB stack. MeshCore separately supports USB serial, Bluetooth LE and its companion TCP connection over Wi-Fi. `launch-browser-console.cmd` is an optional Windows browser interface to the same native USB backend.
 
 ## Appearance
 
@@ -323,15 +335,16 @@ pnpm release:checksums
 The installer, `.blockmap`, `latest.yml` update manifest and `SHA256SUMS.txt`
 are written to `dist/`. On Linux, `pnpm build:linux` writes the AppImage and
 tar.gz; `pnpm build:arch` writes the Arch `.pkg.tar.zst` package. Release checksums
-cover all Linux packages. `pnpm build:dir` produces an unpacked executable for
+cover all Linux packages. On a Mac, `pnpm build:mac:x64` or `pnpm build:mac:arm64`
+writes architecture-specific DMG and ZIP files. `pnpm build:dir` produces an unpacked executable for
 local development. Native workers and DLLs are shipped as regular files so
 their OS paths and library hashes remain valid. Build output and personal
 `local-data` are excluded from Git.
 
 The Windows package includes its x64 Koffi addon and required Visual C++ runtime
-sidecars; the Linux package resolves Koffi and SerialPort for Linux on its build
-runner. The Windows after-pack dependency audit checks native imports and bundled
-decoder hashes before an installer is produced. USB sample
+sidecars; the Linux and macOS packages resolve Koffi and SerialPort for their
+target platform on their build runners. Package dependency audits check native
+imports and bundled decoder hashes before release assets are produced. USB sample
 callbacks copy native memory with `koffi.decode`; external ArrayBuffer views
 are incompatible with Electron's V8 memory cage, including its Node helper
 processes. Version 0.6.2 includes the first-sample crash fix and corrects the
@@ -340,8 +353,8 @@ HD startup response so the controls leave their waiting state after startup.
 For future releases, update `package.json`'s version; the sidebar reads the
 running app version automatically. Add notes in `docs/releases/<version>.md`,
 commit and push the source, then push a matching `v<version>` tag. The release
-Actions workflow builds Windows, generic Linux and Arch packages in parallel,
-then publishes them together from a draft release. Its scoped `GITHUB_TOKEN` supplies publishing access; no
+Actions workflow builds Windows, generic Linux, Arch, macOS Intel and macOS Apple
+silicon packages in parallel, then publishes them together from a draft release. Its scoped `GITHUB_TOKEN` supplies publishing access; no
 personal access token needs to be committed or configured for this workflow.
 Published versions are never overwritten. The release script rejects a tag,
 installer or manifest that does not match the version being published.

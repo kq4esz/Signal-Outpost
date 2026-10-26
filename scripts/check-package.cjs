@@ -1,12 +1,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 
 // Audit the files in the actual distribution, after dependencies are copied.
 // Missing sidecars and modified pinned decoders must fail before publication.
 module.exports = async function checkPackage(context) {
   if (context.electronPlatformName === 'linux') {
     checkLinuxPackage(context.appOutDir);
+    return;
+  }
+  if (context.electronPlatformName === 'darwin') {
+    checkMacPackage(context.appOutDir);
     return;
   }
   if (context.electronPlatformName !== 'win32') return;
@@ -96,6 +101,70 @@ module.exports = async function checkPackage(context) {
   }
   console.log(`Package dependency audit passed (${files.length} Windows x64 native files).`);
 };
+
+function checkMacPackage(install) {
+  const app = path.join(install, 'Contents', 'Resources', 'app');
+  function requireFile(relative) {
+    const filename = path.join(app, relative);
+    if (!fs.existsSync(filename) || !fs.statSync(filename).isFile()) throw new Error(`Package dependency is missing: ${relative}`);
+    return filename;
+  }
+  const metadata = JSON.parse(fs.readFileSync(requireFile('package.json'), 'utf8'));
+  if (metadata.productName !== 'Signal Outpost' || metadata.name !== 'sdr-extreme') throw new Error('The macOS package has the wrong product identity.');
+  const arch = process.arch;
+  if (!['x64', 'arm64'].includes(arch)) throw new Error(`Unsupported macOS package architecture: ${arch}`);
+  const key = `darwin-${arch}`;
+  const koffi = `node_modules/@koromix/koffi-${key}/${key.replace('-', '_')}/koffi.node`;
+  const serialPort = 'node_modules/@serialport/bindings-cpp/prebuilds/darwin-x64+arm64/@serialport+bindings-cpp.node';
+  const files = [
+    requireFile('node_modules/koffi/index.cjs'),
+    requireFile(koffi),
+    requireFile('node_modules/serialport/dist/index.js'),
+    requireFile(serialPort),
+    requireFile(`native/digital/${key}/bin/dsd-neo`),
+    requireFile(`native/digital/${key}/lib/librtlsdr-app.dylib`),
+    requireFile(`native/hd-radio/${key}/lib/libnrsc5.dylib`)
+  ];
+  for (const [folder, property] of [['native/digital', 'executable'], ['native/hd-radio', 'library']]) {
+    const manifest = JSON.parse(fs.readFileSync(requireFile(`${folder}/manifest.json`), 'utf8'));
+    const runtime = manifest.runtimes?.[key];
+    const filename = requireFile(`${folder}/${runtime?.[property] || ''}`);
+    if (!runtime?.sha256 || createHash('sha256').update(fs.readFileSync(filename)).digest('hex') !== runtime.sha256) {
+      throw new Error(`Pinned native runtime was modified during packaging: ${folder}/${key}`);
+    }
+  }
+  const runtimeDir = path.join(app, 'native');
+  function walk(folder) {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      const filename = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(filename);
+      else if (entry.isFile() && /\.dylib$/i.test(entry.name)) files.push(filename);
+    }
+  }
+  walk(path.join(runtimeDir, 'digital', key));
+  walk(path.join(runtimeDir, 'hd-radio', key));
+  for (const filename of new Set(files)) {
+    if (!/\.(dylib|node)$/.test(filename) && !filename.endsWith(`${path.sep}dsd-neo`)) continue;
+    const architecture = spawnSync('file', ['-b', filename], { encoding: 'utf8' });
+    if (architecture.status !== 0 || !architecture.stdout.includes(arch === 'x64' ? 'x86_64' : 'arm64')) {
+      throw new Error(`Native macOS runtime has the wrong architecture: ${path.relative(app, filename)} (${architecture.stdout.trim()})`);
+    }
+    const imports = spawnSync('otool', ['-L', filename], { encoding: 'utf8' });
+    if (imports.status !== 0) throw new Error(`Could not inspect native macOS dependency: ${path.relative(app, filename)}`);
+    for (const line of imports.stdout.split(/\r?\n/).slice(1)) {
+      const dependency = line.match(/^\s+(.+?)\s+\(compatibility version /)?.[1];
+      if (!dependency) continue;
+      if (/^\/(opt\/homebrew|usr\/local\/Cellar|opt\/local)\//.test(dependency)) {
+        throw new Error(`Native macOS package has an unbundled Homebrew dependency: ${dependency}`);
+      }
+      if (dependency.startsWith('@loader_path/')) {
+        const resolved = path.resolve(path.dirname(filename), dependency.slice('@loader_path/'.length));
+        if (!fs.existsSync(resolved)) throw new Error(`Native macOS dependency is missing: ${path.relative(app, filename)} needs ${dependency}`);
+      }
+    }
+  }
+  console.log(`Package dependency audit passed (macOS ${arch} runtimes and native addons).`);
+}
 
 function checkLinuxPackage(install) {
   const app = path.join(install, 'resources', 'app');

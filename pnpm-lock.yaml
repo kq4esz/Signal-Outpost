@@ -37,6 +37,12 @@ importers:
         specifier: 1.64.0
         version: 1.64.0
     optionalDependencies:
+      '@koromix/koffi-darwin-arm64':
+        specifier: 3.3.3
+        version: 3.3.3
+      '@koromix/koffi-darwin-x64':
+        specifier: 3.3.3
+        version: 3.3.3
       '@koromix/koffi-linux-x64':
         specifier: 3.3.3
         version: 3.3.3
