@@ -8,10 +8,10 @@
   "productName": "Signal Outpost",
   "author": "KQ4ESZ",
   "license": "GPL-3.0-only",
-  "homepage": "https://github.com/kq4esz/SDRExtreme",
+  "homepage": "https://github.com/kq4esz/Signal-Outpost",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kq4esz/SDRExtreme.git"
+    "url": "https://github.com/kq4esz/Signal-Outpost.git"
   },
   "engines": {
     "node": ">=22.12"

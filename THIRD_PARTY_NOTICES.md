@@ -31,7 +31,7 @@ placed beside the application executable; its `VCRUNTIME140.dll` accompanies
 the Blog USB library as well. These are unchanged copies of the same files.
 
 Application source and release tags are available without charge at
-https://github.com/kq4esz/SDRExtreme. The native source archives, manifests,
+https://github.com/kq4esz/Signal-Outpost. The native source archives, manifests,
 build information and notices are included in both the source repository
 and the installed application. Upstream dependency source locations remain
 listed in their respective native notices.

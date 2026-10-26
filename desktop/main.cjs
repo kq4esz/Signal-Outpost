@@ -92,12 +92,12 @@ function createWindow() {
           { label: 'Check for updates…', click: () => { void updates?.check(true); } },
           { id: 'install-update', label: 'Restart to install update', enabled: updates?.snapshot().phase === 'ready', click: () => { void updates?.check(true); } }
         ]
-        : [{ label: 'Download updates…', click: () => external('https://github.com/kq4esz/SDRExtreme/releases/latest') }]),
+        : [{ label: 'Download updates…', click: () => external('https://github.com/kq4esz/Signal-Outpost/releases/latest') }]),
       { type: 'separator' },
-      { label: 'Releases on GitHub', click: () => external('https://github.com/kq4esz/SDRExtreme/releases') },
+      { label: 'Releases on GitHub', click: () => external('https://github.com/kq4esz/Signal-Outpost/releases') },
       { label: 'Open saved data folder', click: () => shell.openPath(DATA_DIR) },
       { label: 'Setup guide', click: () => shell.openPath(path.join(ROOT, 'README.md')) },
-      { label: 'About Signal Outpost', click: () => dialog.showMessageBox(window, { title: 'Signal Outpost', message: `Signal Outpost ${APP_VERSION}`, detail: 'Desktop receiver suite · RTL-SDR direct USB · KiwiSDR network atlas\nUpdates: github.com/kq4esz/SDRExtreme', type: 'info' }) }
+      { label: 'About Signal Outpost', click: () => dialog.showMessageBox(window, { title: 'Signal Outpost', message: `Signal Outpost ${APP_VERSION}`, detail: 'Desktop receiver suite · RTL-SDR direct USB · KiwiSDR network atlas\nUpdates: github.com/kq4esz/Signal-Outpost', type: 'info' }) }
     ] }
   ]));
 }

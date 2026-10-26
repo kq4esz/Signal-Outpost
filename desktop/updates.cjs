@@ -79,7 +79,7 @@ function createUpdates({ getWindow, dataDir, beforeInstall, onStatus = () => {} 
   }
   async function check(manual = false) {
     if (!supportsAutomaticUpdates) {
-      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: process.platform === 'darwin' ? 'Install macOS updates from GitHub Releases.' : 'Install Linux updates from GitHub Releases.', detail: 'Choose the package for your desktop from https://github.com/kq4esz/SDRExtreme/releases/latest.' });
+      if (manual) await message({ type: 'info', title: 'Signal Outpost updates', message: process.platform === 'darwin' ? 'Install macOS updates from GitHub Releases.' : 'Install Linux updates from GitHub Releases.', detail: 'Choose the package for your desktop from https://github.com/kq4esz/Signal-Outpost/releases/latest.' });
       return;
     }
     if (!app.isPackaged) {
@@ -88,7 +88,7 @@ function createUpdates({ getWindow, dataDir, beforeInstall, onStatus = () => {} 
     }
     if (disposed || installing) return;
     if (!updater) {
-      if (manual) await message({ type: 'warning', title: 'Update check failed', message: 'The updater could not start.', detail: `${status.error || 'Reinstall the latest Windows setup executable from GitHub Releases.'}\n\nhttps://github.com/kq4esz/SDRExtreme/releases/latest` });
+      if (manual) await message({ type: 'warning', title: 'Update check failed', message: 'The updater could not start.', detail: `${status.error || 'Reinstall the latest Windows setup executable from GitHub Releases.'}\n\nhttps://github.com/kq4esz/Signal-Outpost/releases/latest` });
       return;
     }
     if (ready) {
@@ -117,7 +117,7 @@ function createUpdates({ getWindow, dataDir, beforeInstall, onStatus = () => {} 
       } catch (error) {
         failures++;
         failed(error);
-        if (manual && !disposed) await message({ type: 'warning', title: 'Update check failed', message: 'Could not download or check for updates.', detail: `${error.message}\n\nThe app will retry automatically. If this keeps happening, download the latest installer from https://github.com/kq4esz/SDRExtreme/releases/latest and run it over the existing installation.` });
+        if (manual && !disposed) await message({ type: 'warning', title: 'Update check failed', message: 'Could not download or check for updates.', detail: `${error.message}\n\nThe app will retry automatically. If this keeps happening, download the latest installer from https://github.com/kq4esz/Signal-Outpost/releases/latest and run it over the existing installation.` });
       } finally { busy = null; schedule(); }
     })();
     return busy;

@@ -115,6 +115,6 @@ nsis:
 publish:
   provider: github
   owner: kq4esz
-  repo: SDRExtreme
+  repo: Signal-Outpost
   releaseType: release
   vPrefixedTagName: true

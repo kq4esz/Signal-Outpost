@@ -52,15 +52,16 @@ shortcuts, executable and installer display the new name.
 
 The existing `%APPDATA%\SDR Extreme` profile is reused, including memories,
 hardware settings, MeshCore contacts, conversation history and layouts, and
-Bluetooth/browser data. The internal package name (`sdr-extreme`), Windows app
-ID (`com.sdrextreme.desktop`) and GitHub update repository
-(`kq4esz/SDRExtreme`) retain their original identifiers for upgrade compatibility.
-These identifiers and the existing installation folder can still contain the
-old name. No profile move or uninstall is required.
+Bluetooth/browser data. The internal package name (`sdr-extreme`) and Windows
+app ID (`com.sdrextreme.desktop`) retain their original identifiers for upgrade
+compatibility. The GitHub repository is now
+[`kq4esz/Signal-Outpost`](https://github.com/kq4esz/Signal-Outpost). The app ID
+and existing installation folder can still contain the old name. No profile
+move or uninstall is required.
 
 ## Start the app
 
-1. On Windows, download the current **Signal-Outpost-Setup** installer from [GitHub Releases](https://github.com/kq4esz/SDRExtreme/releases/latest), run the installer, then launch **Signal Outpost** from the desktop or Start menu. The installer includes Electron, the local service, USB libraries and decoders; Node.js is not required. Linux users can choose the AppImage or tar.gz package; Arch users can install the `.pkg.tar.zst` release package with `pacman -U`. Mac users should choose the matching x64 or arm64 DMG, move Signal Outpost to Applications, then use the one-time **Privacy & Security → Open Anyway** approval if Gatekeeper blocks first launch.
+1. On Windows, download the current **Signal-Outpost-Setup** installer from [GitHub Releases](https://github.com/kq4esz/Signal-Outpost/releases/latest), run the installer, then launch **Signal Outpost** from the desktop or Start menu. The installer includes Electron, the local service, USB libraries and decoders; Node.js is not required. Linux users can choose the AppImage or tar.gz package; Arch users can install the `.pkg.tar.zst` release package with `pacman -U`. Mac users should choose the matching x64 or arm64 DMG, move Signal Outpost to Applications, then use the one-time **Privacy & Security → Open Anyway** approval if Gatekeeper blocks first launch.
 2. Open **Settings → RTL-SDR device manager**. Click **Refresh**, select your attached receiver, and save the hardware settings.
 3. Go to **Live radio** and click **Start listening**. Select a memory or tune to a frequency.
 4. Go to **KiwiSDR network** to choose a receiver on the world map or in the station list. Select a station, then click **Check & listen**. Its listening interface opens inside the app; **Open receiver in a new window** offers a dedicated desktop window if a receiver blocks embedding.
@@ -291,7 +292,7 @@ unknown-publisher warning. Download from this project's releases and compare
 `SHA256SUMS.txt` when checking a downloaded installer.
 
 The startup updater, introduced in **SDR Extreme 0.10.2**, immediately checks
-**kq4esz/SDRExtreme** releases before opening the receiver. A startup screen
+**kq4esz/Signal-Outpost** releases before opening the receiver. A startup screen
 shows download progress; available stable updates install automatically and
 reopen the updated app. Downloads use HTTPS and SHA-512 verification.
 **Open Signal Outpost now** continues the check/download in the background.
@@ -316,7 +317,7 @@ they install after normal exit, not immediately on opening. Use
 **Help → Check for updates**, allow the download to finish, then choose
 **Help → Restart to install update**. If that check/download fails or the version
 still stays old, close the app and run the latest setup executable from
-[GitHub Releases](https://github.com/kq4esz/SDRExtreme/releases/latest) over the
+[GitHub Releases](https://github.com/kq4esz/Signal-Outpost/releases/latest) over the
 existing installation. Use the same Windows account and installation folder.
 Memories, MeshCore history, and settings are preserved; do not uninstall or
 delete the saved data folder. This brings the corrected startup updater to
