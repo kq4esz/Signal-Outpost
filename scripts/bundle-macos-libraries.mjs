@@ -66,6 +66,21 @@ function resolveDependency(value, loader, executable, sourceRpaths) {
 }
 
 function sha256(filename) { return createHash('sha256').update(fs.readFileSync(filename)).digest('hex'); }
+function bundledLibraryPath(source) {
+  const directory = path.join(runtime, 'lib');
+  fs.mkdirSync(directory, { recursive: true });
+  const basename = path.basename(source);
+  const normal = path.join(directory, basename);
+  if (!fs.existsSync(normal) || sha256(normal) === sha256(source)) return normal;
+  const extensionAt = basename.toLowerCase().indexOf('.dylib');
+  const splitAt = extensionAt < 0 ? basename.length : extensionAt;
+  const suffix = sha256(source).slice(0, 12);
+  const candidate = path.join(directory, `${basename.slice(0, splitAt)}-${suffix}${basename.slice(splitAt)}`);
+  if (fs.existsSync(candidate) && sha256(candidate) !== sha256(source)) {
+    throw new Error(`Could not allocate a unique name for conflicting macOS library ${basename} from ${source}.`);
+  }
+  return candidate;
+}
 function bundleLicenses(source) {
   const segments = source.split(path.sep);
   const cellar = segments.indexOf('Cellar');
@@ -112,11 +127,9 @@ for (let index = 0; index < queue.length; index++) {
     if (insideRuntime(resolved)) bundled = resolved;
     else {
       bundleLicenses(resolved);
-      bundled = path.join(runtime, 'lib', path.basename(resolved));
+      bundled = bundledLibraryPath(resolved);
       fs.mkdirSync(path.dirname(bundled), { recursive: true });
-      if (fs.existsSync(bundled)) {
-        if (sha256(bundled) !== sha256(resolved)) throw new Error(`Conflicting bundled macOS libraries named ${path.basename(resolved)}.`);
-      } else fs.copyFileSync(resolved, bundled);
+      if (!fs.existsSync(bundled)) fs.copyFileSync(resolved, bundled);
     }
     const relative = path.relative(path.dirname(target), bundled).split(path.sep).join('/');
     const replacement = `@loader_path/${relative}`;
