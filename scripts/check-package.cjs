@@ -103,7 +103,9 @@ module.exports = async function checkPackage(context) {
 };
 
 function checkMacPackage(install) {
-  const app = path.join(install, 'Contents', 'Resources', 'app');
+  const bundles = fs.readdirSync(install).filter(name => name.endsWith('.app'));
+  if (bundles.length !== 1) throw new Error(`Expected one macOS application bundle in ${install}, found ${bundles.length}.`);
+  const app = path.join(install, bundles[0], 'Contents', 'Resources', 'app');
   function requireFile(relative) {
     const filename = path.join(app, relative);
     if (!fs.existsSync(filename) || !fs.statSync(filename).isFile()) throw new Error(`Package dependency is missing: ${relative}`);
