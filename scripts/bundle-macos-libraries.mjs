@@ -41,6 +41,12 @@ function resolveDependency(value, loader, executable, sourceRpaths) {
   if (/^\/(System\/Library|usr\/lib)\//.test(value)) return null;
   const direct = expand(value, loader, executable);
   if (direct && fs.existsSync(direct)) return fs.realpathSync(direct);
+  // CMake-built dylibs can use @rpath install names without recording an
+  // LC_RPATH of their own. The build keeps the dependency beside the loader.
+  if (value.startsWith('@rpath/')) {
+    const sibling = path.resolve(path.dirname(loader), value.slice('@rpath/'.length));
+    if (fs.existsSync(sibling)) return fs.realpathSync(sibling);
+  }
   const candidates = [];
   for (const rpath of sourceRpaths) {
     const base = expand(rpath, loader, executable) || rpath;
