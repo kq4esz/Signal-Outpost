@@ -148,6 +148,7 @@ button:disabled{cursor:default;opacity:.5}
 .form-three-col{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:10px}
 .channel-dialog textarea{height:auto!important;min-height:70px;padding:9px 10px;line-height:1.7;font:11px var(--mono)}
 .channel-dialog #channel-site-frequencies{min-height:105px}.channel-dialog .field-label{line-height:1.5}
+.talkgroup-settings{border-top:1px solid #283944;margin-top:14px;padding-top:12px}.talkgroup-filter-toggle{display:flex;align-items:center;gap:8px;color:#d8e6df;font-size:11px;cursor:pointer}.talkgroup-filter-toggle input,.talkgroup-option input{accent-color:var(--lime);width:14px;height:14px;margin:0}.talkgroup-list{display:grid;gap:2px;max-height:180px;overflow:auto;margin:6px 0 12px;padding:5px;border:1px solid #293b45;border-radius:5px;background:#0d171f}.talkgroup-option{display:flex;align-items:center;gap:8px;min-height:28px;padding:3px 5px;color:#b9c9ce;font-size:10px;cursor:pointer}.talkgroup-option[hidden]{display:none}.talkgroup-option span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.talkgroup-option small{margin-left:auto;flex:none;color:#80949d;font:9px var(--mono)}.talkgroup-option.encrypted{opacity:.48;cursor:not-allowed}.talkgroup-empty{padding:8px;color:#80949d;font-size:10px}
 .memory-scan-panel{padding:16px 18px;margin:0 0 14px}
 .memory-scan-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:15px}
 .memory-scan-heading strong{display:block;color:#d8e6df;font:500 16px var(--display);margin-top:6px}

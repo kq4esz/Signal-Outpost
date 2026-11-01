@@ -239,7 +239,7 @@ function renderChannelRows() {
   for (const channel of filtered) {
     const row = document.createElement('div'); row.className = `channel-row ${channel.kind === 'trunked' ? 'trunked' : ''}`;
     const freq = channel.kind === 'trunked' ? (channel.frequency ? formatFrequency(channel.frequency) : `${channel.sites?.length || 0} sites`) : formatMHz(channel.frequency,6);
-    const detail = channel.kind === 'trunked' ? `${channel.sites?.length || 0} sites · ${channel.talkgroups?.length || 0} talkgroups` : channel.notes || 'Conventional memory';
+    const detail = channel.kind === 'trunked' ? `${channel.sites?.length || 0} sites · ${channel.talkgroupFilterEnabled ? `following ${channel.talkgroupIds?.length || 0} of ${channel.talkgroups?.length || 0} talkgroups` : `${channel.talkgroups?.length || 0} talkgroups`}` : channel.notes || 'Conventional memory';
     const sourceClass = channel.source === 'RadioReference' ? 'rr' : '';
     const isTrunked=channel.kind==='trunked',hasControls=trunkControlFrequencies(channel).length>0;
     const conflict=isTrunked?selectedConventional:selectedTrunked;
@@ -294,8 +294,35 @@ function openChannelDialog(channel=null, {draft=false}={}) {
   const site=channel?.sites?.[0];$('#channel-site-name').value=site?.name||'Main site';
   $('#channel-site-frequencies').value=(site?.frequencies||[]).map(item=>`${item.lcn!==null&&item.lcn!==undefined&&item.lcn!==''?item.lcn+', ':''}${formatMHz(item.frequency)}, ${item.use==='d'?'control':item.use==='a'?'alternate':'voice'}`).join('\n');
   $('#channel-preserved-sites').textContent=channel?.sites?.length>1?`This edits the primary site. ${channel.sites.length-1} other site(s) and ${channel.talkgroups?.length||0} talkgroups are retained.`:'';
+  const knownTalkgroupIds=new Set((channel?.talkgroups||[]).map(group=>String(group.id)));
+  const savedTalkgroupIds=(channel?.talkgroupIds||[]).map(String);
+  $('#channel-talkgroup-filter').checked=channel?.talkgroupFilterEnabled===true;
+  $('#channel-talkgroup-custom').value=savedTalkgroupIds.filter(id=>!knownTalkgroupIds.has(id)).join(', ');
+  $('#channel-talkgroup-search').value='';
+  renderTalkgroupChoices(channel);
   updateChannelProtocolFields();$('#save-channel').disabled=false;$('#channel-dialog').returnValue='';
   $('#channel-dialog').showModal();
+}
+function renderTalkgroupChoices(channel) {
+  const list=$('#channel-talkgroup-list');list.replaceChildren();
+  const seen=new Set(),groups=(channel?.talkgroups||[]).filter(group=>{
+    if(!group||typeof group!=='object')return false;
+    const id=String(group.id??'').trim();if(!/^\d{1,8}$/.test(id)||seen.has(id))return false;seen.add(id);return true;
+  });
+  if(!groups.length){const empty=document.createElement('span');empty.className='talkgroup-empty';empty.textContent='No imported talkgroups. Enter IDs below to create a custom allowlist.';list.append(empty);return;}
+  const selected=new Set((channel?.talkgroupIds||[]).map(String));
+  for(const group of groups){
+    const id=String(group.id),encrypted=group.encrypted===true,label=document.createElement('label');
+    label.className=`talkgroup-option${encrypted?' encrypted':''}`;label.dataset.search=`${id} ${group.alpha||''} ${group.description||''}`.toLowerCase();
+    const input=document.createElement('input');input.type='checkbox';input.dataset.talkgroupId=id;input.checked=selected.has(id);input.disabled=encrypted;
+    const name=document.createElement('span');name.textContent=group.alpha||group.description||`Talkgroup ${id}`;
+    const number=document.createElement('small');number.textContent=encrypted?`${id} · encrypted`:id;
+    label.append(input,name,number);list.append(label);
+  }
+}
+function filterTalkgroupChoices() {
+  const query=$('#channel-talkgroup-search').value.trim().toLowerCase();
+  $$('#channel-talkgroup-list .talkgroup-option').forEach(option=>{option.hidden=Boolean(query&&!option.dataset.search.includes(query));});
 }
 async function saveCurrentMemory(page) {
   const button=$(page==='decoders'?'#digital-add-memory':'#save-current-memory');button.disabled=true;
@@ -328,6 +355,11 @@ async function saveChannel(event) {
   try {
     if(body.mode==='HD')Object.assign(body,hdMemoryOptions({...body,hdProgram:$('#channel-hd-program').value}));
     if(DIGITAL.has(body.mode))Object.assign(body,digitalOptions({mode:body.mode,p25Phase:$('#channel-p25-phase').value,p25Control:$('#channel-p25-control').value,p25Modulation:$('#channel-p25-modulation').value,p25Wacn:$('#channel-p25-wacn').value,p25SystemId:$('#channel-p25-system-id').value,p25Nac:$('#channel-p25-nac').value,nxdnMode:$('#channel-nxdn-mode').value}));
+    if(body.kind==='trunked'){
+      body.talkgroupFilterEnabled=$('#channel-talkgroup-filter').checked;
+      body.talkgroupIds=$$('#channel-talkgroup-list input[data-talkgroup-id]:checked').map(input=>input.dataset.talkgroupId);
+      body.talkgroupIds.push(...$('#channel-talkgroup-custom').value.split(/[\s,;]+/).map(id=>id.trim()).filter(Boolean));
+    }
     if(body.kind==='trunked'){const old=state.editingChannel?.sites||[];body.sites=[{...(old[0]||{}),id:old[0]?.id||'main',name:$('#channel-site-name').value.trim()||'Main site',frequencies:siteFrequencies($('#channel-site-frequencies').value,body.frequency)},...old.slice(1)];}
     $('#save-channel').disabled=true;
     if (id) await requestApi(`/api/channels/${encodeURIComponent(id)}`,body,'PUT'); else await api('/api/channels',body);
@@ -973,7 +1005,7 @@ function bindEvents() {
   document.addEventListener('click',event=>{if(!event.target.closest('.step-select'))$('#step-menu').classList.add('hidden');});
   $('#mode-select').addEventListener('change',event=>changeMode(event.target.value));$('#connect-button').addEventListener('click',startListening);$('#placeholder-connect').addEventListener('click',()=>isDigitalActive()?setPage('decoders'):startListening());$('#scan-button').addEventListener('click',toggleScan);
   $('#volume-slider').addEventListener('input',event=>{state.volume=Number(event.target.value)/100;$('#volume-value').textContent=event.target.value;if(audioGain&&!state.muted)audioGain.gain.value=state.volume;});$('#mute-button').addEventListener('click',()=>{state.muted=!state.muted;$('#mute-button').textContent=state.muted?'◖̸':'◖';if(audioGain)audioGain.gain.value=state.muted?0:state.volume;});
-  $('#quick-add').addEventListener('click',()=>openChannelDialog());$('#add-channel-bottom').addEventListener('click',()=>openChannelDialog());$('#add-channel-button').addEventListener('click',()=>openChannelDialog());$('#empty-add').addEventListener('click',()=>openChannelDialog());$('#channel-form').addEventListener('submit',saveChannel);
+  $('#quick-add').addEventListener('click',()=>openChannelDialog());$('#add-channel-bottom').addEventListener('click',()=>openChannelDialog());$('#add-channel-button').addEventListener('click',()=>openChannelDialog());$('#empty-add').addEventListener('click',()=>openChannelDialog());$('#channel-form').addEventListener('submit',saveChannel);$('#channel-talkgroup-search').addEventListener('input',filterTalkgroupChoices);
   $('#import-rr-button').addEventListener('click',openRadioReferenceDialog);$('#rr-form').addEventListener('submit',importRR);$('#channel-search').addEventListener('input',renderChannelRows);$('#channel-filter').addEventListener('change',renderChannelRows);$('#export-channels').addEventListener('click',exportChannels);$('#import-file').addEventListener('change',event=>{const file=event.target.files?.[0];if(file)importChannelsFile(file);event.target.value='';});
   $('#usb-refresh').addEventListener('click',refreshUsbDevices);$('#usb-device').addEventListener('change',renderUsbDevice);
   $('#usb-tuner-auto').addEventListener('change',()=>{$('#usb-gain').disabled=$('#usb-tuner-auto').checked;});

@@ -369,8 +369,8 @@ function trunkedControlPlan(channelList, channelIds) {
     }
   }
   if (!entries.length) throw new Error('The selected trunked systems have no saved control frequencies.');
-  const decoderProfiles = new Set(entries.map(({ channel }) => JSON.stringify(decoderFlags(channel, { trunked: true }))));
-  if (decoderProfiles.size > 1) throw new Error('Keep one decoder profile per scan so the tuner can stay open between control frequencies. Scan systems with different protocol settings separately.');
+  const decoderProfiles = new Set(entries.map(({ channel }) => JSON.stringify({ flags: decoderFlags(channel, { trunked: true }), talkgroupFilterEnabled: channel.talkgroupFilterEnabled === true })));
+  if (decoderProfiles.size > 1) throw new Error('Keep one decoder profile and talkgroup-filter mode per scan so the tuner can stay open between control frequencies.');
   return { ids, systems, entries };
 }
 
@@ -382,7 +382,11 @@ function writeTrunkedDecoderMaps(trunked, site, frequency, folder) {
   const groupMap = path.join(folder, `${stem}-groups.csv`);
   const mapRows = channelMapRows(site, frequency);
   const groupRows = ['DEC,Mode(A- Allow; B - Block; DE - Digital Enc),Name of Group,Tag (do not delete this line or it will not import properly)'];
-  for (const group of trunked.talkgroups || []) if (!group.encrypted && group.id) groupRows.push([group.id,'A',group.alpha || group.description || `Talkgroup ${group.id}`,`RR ${trunked.systemId}`].map(csvCell).join(','));
+  const knownGroups = new Map((trunked.talkgroups || []).map(group => [String(group.id), group]));
+  const selectedGroups = trunked.talkgroupFilterEnabled
+    ? trunked.talkgroupIds.map(id => knownGroups.get(id) || { id, alpha: `Talkgroup ${id}` })
+    : trunked.talkgroups || [];
+  for (const group of selectedGroups) if (!group.encrypted && group.id !== undefined && group.id !== null && String(group.id) !== '') groupRows.push([group.id,'A',group.alpha || group.description || `Talkgroup ${group.id}`,`RR ${trunked.systemId}`].map(csvCell).join(','));
   fs.writeFileSync(channelMap, mapRows.join('\r\n') + '\r\n', 'utf8');
   fs.writeFileSync(groupMap, groupRows.join('\r\n') + '\r\n', 'utf8');
   return { channelMap, groupMap };
@@ -878,6 +882,7 @@ async function launchDigital(body, generation) {
       ? trunkedScanner.mapDirectory : path.join(DATA_DIR, integrated ? 'digital' : 'dsd-fme');
     const { channelMap, groupMap } = writeTrunkedDecoderMaps(trunked, selectedSite, freq, folder);
     args.push('-T', '-C', channelMap, '-G', groupMap);
+    if (trunked.talkgroupFilterEnabled) args.push('-W');
   } else if (plan) {
     const digitalMemories = plan.channels;
     const folder = path.join(DATA_DIR, integrated ? 'digital' : 'dsd-fme'); fs.mkdirSync(folder, { recursive: true });
