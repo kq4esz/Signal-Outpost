@@ -6,6 +6,7 @@ import { hdMemoryOptions } from './lib/hd-options.mjs';
 import { PlaybackBuffer } from './lib/playback-buffer.mjs';
 import { MeshCoreUi } from './meshcore-ui.js';
 import { PropagationUi } from './propagation-ui.js';
+import { waterfallPixelFrequency } from './lib/waterfall-tuning.mjs';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const DIGITAL = new Set(['P25', 'DMR', 'NXDN', 'D-STAR', 'YSF', 'M17']);
@@ -671,20 +672,13 @@ function waterfallFrame(view) {
 function waterfallFrequency(view,event) {
   const frame=waterfallFrame(view),rect=view.waterfall.getBoundingClientRect();
   if(!frame||!rect.width)return null;
-  const left=43,right=12,x=event.clientX-rect.left,plotWidth=rect.width-left-right;
-  if(plotWidth<=0||x<left||x>rect.width-right)return null;
-  const fraction=(x-left)/plotWidth;
-  return Math.round(frame.center-frame.span/2+fraction*frame.span);
-}
-function snapWaterfallFrequency(frequency) {
-  // Keep click-to-tune precise even when the manual tuning step is 25 kHz or larger.
-  const step=1000;
-  return Math.round(frequency/step)*step;
+  return waterfallPixelFrequency({center:frame.center,span:frame.span,x:event.clientX-rect.left,cssWidth:rect.width,
+    backingWidth:view.waterfall.width,pixelRatio:Math.min(window.devicePixelRatio||1,2)});
 }
 async function tuneFromWaterfall(view,event) {
   const clickedFrequency=waterfallFrequency(view,event);
-  if(!clickedFrequency)return;
-  const frequency=snapWaterfallFrequency(clickedFrequency);
+  if(clickedFrequency===null)return;
+  const frequency=clickedFrequency;
   try {
     if(frequency<10000||frequency>1766000000){toast('This frequency is outside the application tuning range.','error');return;}
     const supported=state.wideSurvey?.running?state.wideSurvey.ranges:state.status?.connected?rtlSurveyRanges():null;
@@ -979,8 +973,7 @@ function bindEvents() {
     view.waterfall.title='Click a signal to tune to its frequency';
     view.waterfall.addEventListener('pointermove',event=>{
       const frequency=waterfallFrequency(view,event);
-      const snapped=frequency?snapWaterfallFrequency(frequency):null;
-      view.waterfall.title=snapped?`Click to tune to ${formatFrequency(snapped)} (1 kHz resolution)`:'Click a signal to tune to its frequency';
+      view.waterfall.title=frequency!==null?`Click to tune to ${formatFrequency(frequency)}`:'Click a signal to tune to its frequency';
     });
     view.waterfall.addEventListener('pointerleave',()=>{view.waterfall.title='Click a signal to tune to its frequency';});
     view.waterfall.addEventListener('click',event=>{void tuneFromWaterfall(view,event);});
