@@ -60,6 +60,7 @@ module.exports = async function checkPackage(context) {
     'lib/iss-orbit.mjs',
     'lib/iss-worker.mjs',
     'lib/wsjt-decodes.mjs',
+    'lib/waterfall-tuning.mjs',
     'node_modules/satellite.js/dist/index.js',
     'node_modules/satellite.js/dist/propagation/sgp4.js',
     'node_modules/satellite.js/LICENSE.md',
@@ -119,6 +120,7 @@ function checkMacPackage(install) {
   const koffi = `node_modules/@koromix/koffi-${key}/${key.replace('-', '_')}/koffi.node`;
   const serialPort = 'node_modules/@serialport/bindings-cpp/prebuilds/darwin-x64+arm64/@serialport+bindings-cpp.node';
   const files = [
+    requireFile('lib/waterfall-tuning.mjs'),
     requireFile('node_modules/koffi/index.cjs'),
     requireFile(koffi),
     requireFile('node_modules/serialport/dist/index.js'),
@@ -175,6 +177,7 @@ function checkLinuxPackage(install) {
     if (!fs.existsSync(filename) || !fs.statSync(filename).isFile()) throw new Error(`Package dependency is missing: ${relative}`);
     return filename;
   }
+  requireFile('lib/waterfall-tuning.mjs');
   for (const [folder, property] of [
     ['native/hd-radio', 'library'],
     ['native/digital', 'executable']
