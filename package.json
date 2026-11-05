@@ -1,6 +1,6 @@
 {
   "name": "sdr-extreme",
-  "version": "0.16.20",
+  "version": "0.16.21",
   "private": true,
   "type": "module",
   "description": "Amateur radio and scanner desktop suite with RTL-SDR USB, HD Radio, digital decoders, KiwiSDR and MeshCore.",

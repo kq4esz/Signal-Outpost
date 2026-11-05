@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { waterfallPixelFrequency } from '../lib/waterfall-tuning.mjs';
+import { snapWaterfallFrequency, waterfallPixelFrequency } from '../lib/waterfall-tuning.mjs';
 
 test('maps the painted backing pixel center to frequency at device scale 1', () => {
   assert.equal(waterfallPixelFrequency({
@@ -23,13 +23,10 @@ test('rejects clicks in the waterfall margins', () => {
   assert.equal(waterfallPixelFrequency({ ...settings, x: 988 }), null);
 });
 
-test('does not force clicked frequencies onto a 1 kHz grid', () => {
-  const frequency = waterfallPixelFrequency({
-    center: 100_000_000, span: 125_000, x: 44.25,
-    cssWidth: 1000, backingWidth: 1000, pixelRatio: 1
-  });
-  assert.equal(frequency, 99_937_698);
-  assert.notEqual(frequency % 1000, 0);
+test('snaps waterfall clicks to the selected tuning step', () => {
+  assert.equal(snapWaterfallFrequency(102_694_252, 25_000), 102_700_000);
+  assert.equal(snapWaterfallFrequency(102_694_252, 1_000), 102_694_000);
+  assert.equal(snapWaterfallFrequency(102_694_252, 0), null);
 });
 
 test('serves the waterfall tuning module to the renderer', () => {
