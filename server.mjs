@@ -302,8 +302,8 @@ async function startReceiver(body = {}) {
   if (hdStarting) throw new Error('Wait for HD Radio to finish starting.');
   if (digitalProcess || digitalSession?.active || digitalStarting) throw new Error('Stop the digital decoder before opening the USB receiver.');
   await stopHd();
-  stopScan();
-  if (receiver) await stopReceiver();
+  if (!body.keepScan) stopScan();
+  if (receiver) await stopReceiver({ keepScan: body.keepScan === true });
   const freq = validFrequency(body.frequency ?? activeFrequency);
   const rate = Number(body.sampleRate || settings.sampleRate || 2400000);
   if (![1024000, 1200000, 1800000, 2048000, 2400000, 2560000, 2880000, 3200000].includes(rate)) throw new Error('Choose a supported USB sample rate.');
@@ -336,9 +336,9 @@ async function startReceiver(body = {}) {
     throw error;
   }
 }
-async function stopReceiver() {
+async function stopReceiver({ keepScan = false } = {}) {
   const usb = receiver; receiver = null;
-  stopScan();
+  if (!keepScan) stopScan();
   if (usb) await usb.close();
   rtlInfo = null; resetDsp();
   broadcast({ type: 'status', status: status() });
@@ -490,6 +490,55 @@ async function startTrunkedScan(body) {
   }
 }
 
+function canRetuneDigitalMemory(channel) {
+  if (!digitalSession?.active || settings.digitalEngine === 'external' || !activeDigitalConfig) return false;
+  try {
+    return JSON.stringify(decoderFlags(activeDigitalConfig, { trunked: false })) === JSON.stringify(decoderFlags(channel, { trunked: false }));
+  } catch { return false; }
+}
+
+async function startHybridScan(plan, body) {
+  const session = new MemoryScanner(plan, {
+    tune: async channel => {
+      if (DIGITAL_MODES.has(channel.mode)) {
+        if (receiver) await stopReceiver({ keepScan: true });
+        if (canRetuneDigitalMemory(channel)) {
+          await digitalSession.retune(channel.frequency);
+          activeFrequency = channel.frequency; appMode = channel.mode; selectedChannelId = channel.id;
+        } else {
+          if (digitalProcess || digitalSession?.active) await stopDigital();
+          await startDigital({ memoryId: channel.id, hybridScan: true });
+        }
+      } else {
+        if (digitalProcess || digitalSession?.active) await stopDigital();
+        if (!receiver?.connected) {
+          await startReceiver({ frequency: channel.frequency, mode: channel.mode, gain: settings.tunerGain || 0, keepScan: true });
+        } else {
+          const usb = receiver;
+          await usb.command('frequency', channel.frequency);
+          if (!usb.connected || receiver !== usb) throw new Error('The USB receiver disconnected during scanning.');
+          activeFrequency = channel.frequency; appMode = channel.mode; selectedChannelId = channel.id; resetDsp();
+        }
+      }
+    },
+    event: (type, scan) => broadcast({ type, channel: scan.channel, scan, index: session.index, total: plan.channels.length }),
+    error: error => { if (scanner === session) { scanner = null; broadcast({ type: 'scan-error', message: error.message }); broadcast({ type: 'status', status: status() }); } }
+  });
+  scanner = session;
+  try {
+    const scan = await session.start();
+    if (!scan.active) throw new Error('The mixed memory scanner could not start. Check the USB receiver and digital decoder.');
+    if (body.channelIds !== undefined) setSettings({ scanChannelIds: plan.channelIds });
+    broadcast({ type: 'status', status: status() });
+    return { ...scan, scan };
+  } catch (error) {
+    if (scanner === session) stopScan();
+    if (digitalProcess || digitalSession?.active) await stopDigital();
+    if (receiver) await stopReceiver();
+    throw error;
+  }
+}
+
 async function startScan(body = {}) {
   if (hdStarting) throw new Error('Wait for HD Radio to finish starting.');
   if (digitalStarting) throw new Error('Wait for the digital decoder to finish starting.');
@@ -502,6 +551,7 @@ async function startScan(body = {}) {
   await stopHd();
   if (digitalProcess || digitalSession?.active) await stopDigital();
   stopScan();
+  if (plan.engine === 'hybrid') return startHybridScan(plan, body);
   if (plan.engine === 'digital') {
     const result = await startDigital({ scanMemories: true, scanPlan: plan, rapid: plan.rapid });
     if (body.channelIds !== undefined) setSettings({ scanChannelIds: plan.channelIds });
@@ -893,9 +943,9 @@ async function launchDigital(body, generation) {
     args.push('-Y', '-t', plan.rapid ? '0' : '1', '-C', channelMap);
   }
   await stopHd();
-  if (receiver) await stopReceiver();
+  if (receiver) await stopReceiver({ keepScan: body.hybridScan === true });
   if (generation !== digitalGeneration) throw new Error('Decoder start cancelled.');
-  stopScan();
+  if (!body.hybridScan) stopScan();
   if (integrated) {
     if (digitalSession) await digitalSession.stop();
     const mono = flags.some(flag => ['-f1', '-fi', '-fn', '-fd', '-fy', '-fz'].includes(flag));
@@ -929,6 +979,9 @@ async function launchDigital(body, generation) {
         digitalScan.channel = plan.channels.find(channel => channel.frequency === activeFrequency) || null;
         digitalScan.holding = state.calls.some(call => call.state === 2);
       }
+      if (scanner?.active && scanner.plan.engine === 'hybrid' && DIGITAL_MODES.has(scanner.current?.mode)) {
+        scanner.observeActivity(state.calls.some(call => call.state === 2));
+      }
       if (trunkedScanner?.active && trunkedScanner.current) {
         const scan = trunkedScanner, callActive = state.calls.some(call => call.state === 2);
         if (!scan.holdOnSignal) {
@@ -948,7 +1001,8 @@ async function launchDigital(body, generation) {
       }
       if (Date.now() - lastDigitalBroadcast >= 240 || state.phase !== 'listening') {
         lastDigitalBroadcast = Date.now();
-        broadcast({ type: 'digital-state', digital: state, frequency: activeFrequency, gain: activeGain, scan: trunkedScanner?.active ? trunkedScanSnapshot(trunkedScanner) : digitalScan });
+        broadcast({ type: 'digital-state', digital: state, frequency: activeFrequency, gain: activeGain,
+          scan: scanner?.active ? scanner.snapshot() : trunkedScanner?.active ? trunkedScanSnapshot(trunkedScanner) : digitalScan });
       }
     });
     session.on('failure', error => {
@@ -1087,8 +1141,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/scan/start' && req.method === 'POST') return sendJson(res, 200, await startScan(await parseBody(req)));
     if (url.pathname === '/api/scan/stop' && req.method === 'POST') {
       const body = await parseBody(req);
+      const scan = scanner?.active ? scanner.snapshot() : null;
       stopScan();
-      if (trunkedScanner) await stopTrunkedScan();
+      if (scan?.engine === 'hybrid') {
+        if (digitalProcess || digitalSession?.active) await stopDigital();
+        else if (receiver && body.keepReceiver !== true) await stopReceiver();
+      } else if (trunkedScanner) await stopTrunkedScan();
       else if (digitalScan) await stopDigital();
       else if (receiver && body.keepReceiver !== true) await stopReceiver();
       return sendJson(res, 200, status());

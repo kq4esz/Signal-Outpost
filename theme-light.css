@@ -284,6 +284,12 @@
 :root[data-theme="light"] .protocol-fields{border:1px solid var(--light-border);background:var(--light-surface)}
 :root[data-theme="light"] .protocol-fields legend{color:var(--light-green)}
 :root[data-theme="light"] .protocol-help{color:var(--light-muted)}
+:root[data-theme="light"] .talkgroup-settings{border-top:1px solid var(--light-border)}
+:root[data-theme="light"] .talkgroup-filter-toggle{color:var(--light-green)}
+:root[data-theme="light"] .talkgroup-list{border:1px solid var(--light-border);background:var(--light-surface)}
+:root[data-theme="light"] .talkgroup-option{color:var(--light-text)}
+:root[data-theme="light"] .talkgroup-option small{color:var(--light-muted)}
+:root[data-theme="light"] .talkgroup-empty{color:var(--light-muted)}
 :root[data-theme="light"] .memory-scan-heading strong{color:var(--light-green)}
 :root[data-theme="light"] .scan-selection-actions .text-button{color:var(--light-green)}
 :root[data-theme="light"] .memory-scan-controls>label{color:var(--light-muted)}
@@ -332,6 +338,7 @@
 :root[data-theme="light"] .digital-diagnostics pre{background:var(--light-surface);color:var(--light-muted);border-top:1px solid var(--light-border)}
 :root[data-theme="light"] .native-decoder-status{background:var(--light-green-bg);border:1px solid var(--light-green-border);color:var(--light-green)}
 :root[data-theme="light"] .native-decoder-status.unavailable{color:var(--light-amber);border-color:var(--light-amber-border);background:var(--light-amber-bg)}
+:root[data-theme="light"] .scan-current-channel span{color:var(--light-muted)}
 
 /* meshcore.css */
 :root[data-theme="light"] .mesh-state{background:var(--light-surface)}

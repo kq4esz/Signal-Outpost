@@ -4,15 +4,18 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const out = path.join(root, 'dist');
 const linux = process.argv.includes('--linux');
 const mac = process.argv.includes('--mac');
 if (linux && mac) throw new Error('Choose one platform checksum mode per invocation.');
+const linuxPrefix = `Signal-Outpost-${pkg.version}-`;
+const windowsInstaller = `Signal-Outpost-Setup-${pkg.version}-x64.exe`;
 const files = fs.readdirSync(out).filter(name => linux
-  ? /\.(appimage|tar\.gz|pkg\.tar\.zst)$/i.test(name)
+  ? name.startsWith(linuxPrefix) && /\.(appimage|tar\.gz|pkg\.tar\.zst)$/i.test(name)
   : mac
-    ? /\.(dmg|zip)$/i.test(name)
-  : /\.(exe|blockmap|yml)$/.test(name) && !name.startsWith('builder-')).sort();
+    ? name.startsWith(linuxPrefix) && /\.(dmg|zip)$/i.test(name)
+    : [windowsInstaller, `${windowsInstaller}.blockmap`, 'latest.yml'].includes(name)).sort();
 if (linux ? !files.some(name => name.toLowerCase().endsWith('.appimage')) || !files.some(name => name.endsWith('.tar.gz')) || !files.some(name => name.endsWith('.pkg.tar.zst'))
   : mac ? !files.some(name => name.endsWith('-x64.dmg')) || !files.some(name => name.endsWith('-x64.zip')) || !files.some(name => name.endsWith('-arm64.dmg')) || !files.some(name => name.endsWith('-arm64.zip'))
   : !files.some(name => name.endsWith('.exe')) || !files.includes('latest.yml')) {

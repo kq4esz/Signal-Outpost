@@ -35,8 +35,9 @@ while (remoteCommit.type === 'tag') remoteCommit = (await api(`/git/tags/${remot
 if (remoteCommit.sha !== commit) throw new Error('The pushed release tag does not match this checkout.');
 const out = path.join(root, 'dist');
 const installer = `Signal-Outpost-Setup-${pkg.version}-x64.exe`;
-const linuxPackages = fs.readdirSync(out).filter(name => /\.(AppImage|tar\.gz|pkg\.tar\.zst)$/i.test(name)).sort();
-const macPackages = fs.readdirSync(out).filter(name => /\.(dmg|zip)$/i.test(name)).sort();
+const releasePackagePrefix = `Signal-Outpost-${pkg.version}-`;
+const linuxPackages = fs.readdirSync(out).filter(name => name.startsWith(releasePackagePrefix) && /\.(AppImage|tar\.gz|pkg\.tar\.zst)$/i.test(name)).sort();
+const macPackages = fs.readdirSync(out).filter(name => name.startsWith(releasePackagePrefix) && /\.(dmg|zip)$/i.test(name)).sort();
 if (linuxPackages.length && (!linuxPackages.some(name => name.toLowerCase().endsWith('.appimage')) || !linuxPackages.some(name => name.endsWith('.tar.gz')) || !linuxPackages.some(name => name.endsWith('.pkg.tar.zst')) || !fs.existsSync(path.join(out, 'SHA256SUMS-linux.txt')))) {
   throw new Error('A Linux release must include the AppImage, tar.gz, Arch pacman package, and SHA256SUMS-linux.txt.');
 }

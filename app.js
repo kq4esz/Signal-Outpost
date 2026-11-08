@@ -471,31 +471,37 @@ function renderScanStatus() {
   const trunked=selected.length>0&&selected.every(channel=>channel.kind==='trunked');
   const mixed=selected.some(channel=>channel.kind==='trunked')&&!trunked;
   const digital=!trunked&&!mixed&&selected.length>0&&selected.every(channel=>DIGITAL.has(channel.mode));
+  const hybrid=!trunked&&!mixed&&selected.some(channel=>DIGITAL.has(channel.mode))&&selected.some(channel=>!DIGITAL.has(channel.mode));
   const controls=trunked?selected.reduce((sum,channel)=>sum+trunkControlFrequencies(channel).length,0):0;
   const scanSpeed=$('#scan-speed');
-  const scanType=trunked?'trunked':digital?'digital':'native';
-  const speedOptions=trunked?[[1000,'Fastest · 1 second / control frequency'],[2000,'Rapid · 2 seconds / control frequency'],[3000,'Rapid · 3 seconds / control frequency'],[5000,'5 seconds / control frequency'],[10000,'10 seconds / control frequency'],[20000,'20 seconds / control frequency'],[30000,'30 seconds / control frequency']]:digital?[[150,'Rapid · fastest decoder timing'],[1500,'Standard · 1 second dwell']]:[[80,'Fastest · 80 ms'],[150,'Rapid · 150 ms'],[250,'Rapid · 250 ms'],[500,'Standard · 500 ms'],[1500,'Standard · 1.5 seconds']];
-  if(state.scanControlMode!==scanType){const previous=Number(scanSpeed.value);scanSpeed.replaceChildren(...speedOptions.map(([value,label])=>{const option=document.createElement('option');option.value=String(value);option.textContent=label;return option;}));scanSpeed.value=speedOptions.some(([value])=>value===previous)?String(previous):String(trunked?2000:digital?150:150);state.scanControlMode=scanType;}
+  const scanType=trunked?'trunked':hybrid?'hybrid':digital?'digital':'native';
+  const speedOptions=trunked?[[1000,'Fastest · 1 second / control frequency'],[2000,'Rapid · 2 seconds / control frequency'],[3000,'Rapid · 3 seconds / control frequency'],[5000,'5 seconds / control frequency'],[10000,'10 seconds / control frequency'],[20000,'20 seconds / control frequency'],[30000,'30 seconds / control frequency']]:hybrid?[[2500,'2.5 seconds / channel'],[4000,'4 seconds / channel'],[6000,'6 seconds / channel'],[10000,'10 seconds / channel']]:digital?[[150,'Rapid · fastest decoder timing'],[1500,'Standard · 1 second dwell']]:[[80,'Fastest · 80 ms'],[150,'Rapid · 150 ms'],[250,'Rapid · 250 ms'],[500,'Standard · 500 ms'],[1500,'Standard · 1.5 seconds']];
+  if(state.scanControlMode!==scanType){const previous=Number(scanSpeed.value);scanSpeed.replaceChildren(...speedOptions.map(([value,label])=>{const option=document.createElement('option');option.value=String(value);option.textContent=label;return option;}));scanSpeed.value=speedOptions.some(([value])=>value===previous)?String(previous):String(trunked?2000:hybrid?4000:digital?150:150);state.scanControlMode=scanType;}
   $('#scan-hold').disabled=digital;$('#scan-hang').disabled=digital;
   $('#scan-selection-count').textContent=trunked?`${selected.length} trunked system${selected.length===1?'':'s'} · ${controls} control frequenc${controls===1?'y':'ies'}`:`${state.scanSelection.size} channel${state.scanSelection.size===1?'':'s'} selected`;
   const selectTrunked=trunked||(!selected.length&&$('#channel-filter').value==='trunked');
   $('#scan-select-visible').textContent=selectTrunked?'Select visible trunked systems':'Select visible conventional';
   $('#scan-selected').textContent=trunked?'▶ Scan control channels':'▶ Scan selected';
-  $('#scan-selected').disabled=active||state.scanSelection.size===0||mixed;$('#scan-stop').disabled=!active;$('#scan-skip').disabled=!active||!(['native','trunked'].includes(scan?.engine)||state.status?.digital?.engine==='integrated');
+  $('#scan-selected').disabled=active||state.scanSelection.size===0||mixed;$('#scan-stop').disabled=!active;$('#scan-skip').disabled=!active||!(['native','hybrid','trunked'].includes(scan?.engine)||state.status?.digital?.engine==='integrated');
   $('#memory-scan-status').classList.toggle('holding',Boolean(scan?.holding));
   const note=$('.scan-digital-note');
   if(!active){
     if(trunked){$('#memory-scan-status').textContent=`The integrated decoder will rotate through ${controls} saved primary / alternate control frequencies while keeping the RTL-SDR session open. One tuner checks them sequentially; calls can be missed while it is on another site.`;note.textContent='Choose 1–30 seconds per control frequency. Frequency changes retune the open tuner; selected systems must use matching decoder settings. Hold on an active signal keeps the decoder on a call until it ends.';}
     else if(digital){$('#memory-scan-status').textContent='Digital memories use native decoder scan timing and activity hold. Select a matching protocol group.';note.textContent='Digital selections use the integrated decoder. Group NXDN48 and NXDN96 separately. Trunked systems follow their site and talkgroups from Decoders.';}
+    else if(hybrid){$('#memory-scan-status').textContent='Analog and digital memories can be scanned together in one sequence.';note.textContent='Mixed scans switch the single RTL-SDR between analog reception and the digital decoder. Choose at least 2.5 seconds per channel so digital signals have time to acquire. Hold on signal works for analog activity and integrated decoder calls.';}
     else {$('#memory-scan-status').textContent=mixed?'Clear the current selection, then choose either trunked systems or conventional memories.':'Select conventional memories using the checkboxes below. One USB tuner visits the selected frequencies in sequence.';note.textContent='Digital selections use the integrated decoder. Group NXDN48 and NXDN96 separately. Trunked systems follow their site and talkgroups from Decoders.';}
     return;
   }
   if(scan.engine==='trunked'){
     const current=scan.current;
     $('#memory-scan-status').textContent=`Trunked control scan · ${scan.index+1}/${scan.total} · ${current?.systemName||'System'} / ${current?.siteName||'Site'} · ${formatMHz(current?.frequency||0,6)} MHz · ${scan.activity||'Monitoring'} · ${scan.dwellMs/1000}s per frequency`;
+  }else if(scan.engine==='hybrid'){
+    const level=scan.holding&&Number.isFinite(scan.signalDb)?` · +${scan.signalDb} dB over nearby noise`:'';
+    $('#memory-scan-status').textContent=`Analog / digital scan · ${scan.channelCount} selected · ${scan.dwellMs/1000}s minimum dwell · ${scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
   }else{
     const kind=scan.engine==='digital'?'Digital decoder scan':scan.rapid?'Rapid scan':'Memory scan';
-    $('#memory-scan-status').textContent=scan.engine==='digital'?`${kind} · ${scan.channelCount} selected memories · ${scan.rapid?'fastest decoder timing':'1 second dwell'}${scan.channel ? ' · '+scan.channel.name : ''} · see Decoders for activity`:`${kind} · ${scan.channelCount} selected · ${scan.dwellMs} ms dwell · ${scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits`;
+    const level=scan.holding&&Number.isFinite(scan.signalDb)?` · +${scan.signalDb} dB over nearby noise`:'';
+    $('#memory-scan-status').textContent=scan.engine==='digital'?`${kind} · ${scan.channelCount} selected memories · ${scan.rapid?'fastest decoder timing':'1 second dwell'}${scan.channel ? ' · '+scan.channel.name : ''} · see Decoders for activity`:`${kind} · ${scan.channelCount} selected · ${scan.dwellMs} ms dwell · ${scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
   }
   $('#memory-scan-status').classList.toggle('holding',Boolean(scan.holding));
 }
@@ -507,8 +513,9 @@ async function startSelectedScan() {
     if(selected.some(channel=>channel.kind==='trunked')&&!trunked)throw new Error('Select either trunked systems or conventional memories, not both.');
     if(state.settings.digitalEngine!=='external'&&(trunked||selected.some(channel=>DIGITAL.has(channel.mode))))await setupAudio();
     const dwellMs=Number($('#scan-speed').value),result=await api('/api/scan/start',{channelIds:selected.map(channel=>channel.id),rapid:dwellMs<500,dwellMs,holdOnSignal:$('#scan-hold').checked,holdMs:Number($('#scan-hang').value)});
-    state.status={...(state.status||{}),scannerActive:true,scan:result.scan,digitalActive:['digital','trunked'].includes(result.scan.engine),connected:result.scan.engine==='native'};
-    renderStatus();toast(trunked?`Scanning ${result.scan.controlCount} trunked control frequencies.`:`Scanning ${result.scan.channelCount} selected memories.`,'success');
+    const digitalChannel=DIGITAL.has(result.scan.channel?.mode);
+    state.status={...(state.status||{}),scannerActive:true,scan:result.scan,digitalActive:result.scan.engine==='trunked'||result.scan.engine==='digital'||(result.scan.engine==='hybrid'&&digitalChannel),connected:result.scan.engine==='native'||(result.scan.engine==='hybrid'&&!digitalChannel)};
+    renderStatus();toast(trunked?`Scanning ${result.scan.controlCount} trunked control frequencies.`:result.scan.engine==='hybrid'?`Scanning ${result.scan.channelCount} analog and digital memories.`:`Scanning ${result.scan.channelCount} selected memories.`,'success');
   }catch(error){toast(error.message,'error');}
   finally{renderScanStatus();}
 }
@@ -563,7 +570,7 @@ function connectSocket() {
     else if(message.type==='hd-error'){toast(message.message,'error');}
     else if(message.type==='spectrum')receiveSpectrum(message);
     else if(message.type==='meter'){const level=Math.max(0,Math.min(100,message.level*100));$('#audio-meter').style.width=`${level}%`;}
-    else if(message.type==='scan'||message.type==='scan-hold'){if(message.scan){state.status={...state.status,scannerActive:true,scan:message.scan};}const channel=message.channel;if(channel){setFrequencyDisplay(channel.frequency);$('#mode-select').value=channel.mode||'NFM';modeHint(channel.mode||'NFM');state.status={...state.status,frequency:channel.frequency,mode:channel.mode||'NFM'};renderStatus();}}
+    else if(message.type==='scan'||message.type==='scan-hold'){if(message.scan){state.status={...state.status,scannerActive:true,scan:message.scan};}const channel=message.channel;if(channel){const digitalChannel=DIGITAL.has(channel.mode);setFrequencyDisplay(channel.frequency);$('#mode-select').value=channel.mode||'NFM';modeHint(channel.mode||'NFM');state.status={...state.status,frequency:channel.frequency,mode:channel.mode||'NFM',connected:message.scan?.engine==='hybrid'?!digitalChannel:state.status?.connected,digitalActive:message.scan?.engine==='hybrid'?digitalChannel:state.status?.digitalActive};renderStatus();}}
     else if(message.type==='scan-error'){toast(message.message,'error');}
     else if(message.type==='scan-lock'){state.scanning=false;renderStatus();if(message.channel){addActivity(message.channel,'LOCK');toast(`Signal activity on ${message.channel.name}.`,'success');}}
     else if(message.type==='ft8')addFt8Decode(message.decode);
