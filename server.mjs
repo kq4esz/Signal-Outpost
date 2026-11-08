@@ -552,7 +552,7 @@ async function startScan(body = {}) {
   if (digitalProcess || digitalSession?.active) await stopDigital();
   stopScan();
   if (plan.engine === 'hybrid') return startHybridScan(plan, body);
-  if (plan.engine === 'digital') {
+  if (plan.engine === 'digital' || plan.engine === 'dsd') {
     const result = await startDigital({ scanMemories: true, scanPlan: plan, rapid: plan.rapid });
     if (body.channelIds !== undefined) setSettings({ scanChannelIds: plan.channelIds });
     return { ...result.scan, scan: result.scan };
@@ -901,7 +901,6 @@ async function startDigital(body) {
 async function launchDigital(body, generation) {
   const integrated = settings.digitalEngine !== 'external';
   if (integrated && !digitalRuntime().available) throw new Error('The bundled digital decoder is unavailable. Restore the native/digital application files.');
-  if (!integrated && !body.path && !settings.dsdPath) throw new Error('Select the DSD-FME executable in Settings first.');
   const binary = String(body.path || settings.dsdPath || '').trim();
   const trunked = body.channelId ? channels.find(c => c.id === body.channelId && c.kind === 'trunked') : null;
   if (body.channelId && !trunked) throw new Error('Select a saved trunked system first.');
@@ -910,11 +909,14 @@ async function launchDigital(body, generation) {
   const selectedSite = trunked ? (trunked.sites.find(s => String(s.id) === String(body.siteId)) || trunked.sites[0]) : null;
   if (trunked && !selectedSite) throw new Error('This trunked system has no imported sites.');
   const plan = body.scanMemories ? body.scanPlan || scanPlan(channels, { channelIds: body.channelIds || channels.filter(channel => channel.kind !== 'trunked' && channel.enabled !== false && DIGITAL_MODES.has(channel.mode)).map(channel => channel.id), rapid: body.rapid === true }) : null;
-  if (plan && plan.engine !== 'digital') throw new Error('Select digital conventional memories for the digital scanner.');
-  const config = plan?.profile || resolveProtocol(body.protocol, trunked || memory || {});
+  if (plan && !['digital', 'dsd'].includes(plan.engine)) throw new Error('Select digital conventional memories for the digital scanner.');
+  if (plan?.engine === 'dsd' && !integrated) throw new Error('NFM, AM, and digital mixed scans require the bundled DSD-neo decoder. Select Integrated DSD-neo in Settings.');
+  if (!integrated && !body.path && !settings.dsdPath) throw new Error('Select the DSD-FME executable in Settings first.');
+  const config = plan?.engine === 'dsd' ? resolveProtocol('P25') : plan?.profile || resolveProtocol(body.protocol, trunked || memory || {});
   const protocol = config.mode;
+  const decoderLabel = plan?.engine === 'dsd' ? 'DSD-neo mixed-mode scan' : protocolLabel(config);
   const freq = validFrequency(plan ? plan.channels[0].frequency : trunked ? (body.controlFrequency || selectedSite.frequencies.find(f => f.use === 'd')?.frequency || selectedSite.frequencies[0]?.frequency || trunked.frequency) : memory?.frequency || body.frequency || activeFrequency);
-  const flags = plan?.profile.flags || decoderFlags(config, { trunked: Boolean(trunked) });
+  const flags = plan?.engine === 'dsd' ? [] : plan?.profile.flags || decoderFlags(config, { trunked: Boolean(trunked) });
   let deviceIndex = Number(settings.deviceIndex) || 0;
   if (integrated && settings.deviceSerial) {
     const found = await listUsbDevices(settings.rtlLibraryPath);
@@ -922,7 +924,7 @@ async function launchDigital(body, generation) {
     if (!selected) throw new Error(`The selected RTL-SDR (${settings.deviceSerial}) is not attached.`);
     deviceIndex = selected.index;
   }
-  if (integrated && Number(settings.directSampling)) throw new Error('Digital voice requires quadrature sampling. Choose Quadrature in USB hardware settings.');
+  if (integrated && Number(settings.directSampling)) throw new Error('DSD-neo scanning requires quadrature sampling. Choose Quadrature in USB hardware settings.');
   const requestedGain = integrated ? Math.min(49, Math.round(Number(settings.tunerGain || 0) / 10)) : Number(settings.tunerGain || 0) / 10;
   const input = `rtl:${deviceIndex}:${freq}:${requestedGain}:${Number(settings.ppm) || 0}:${integrated ? 48 : protocol === 'NXDN' && config.nxdnMode !== 'NXDN96' ? 8 : 12}:0:2`;
   const args = ['-i', input + (integrated ? `:bias=${settings.biasTee ? 'on' : 'off'}` : ''), ...flags];
@@ -936,11 +938,17 @@ async function launchDigital(body, generation) {
   } else if (plan) {
     const digitalMemories = plan.channels;
     const folder = path.join(DATA_DIR, integrated ? 'digital' : 'dsd-fme'); fs.mkdirSync(folder, { recursive: true });
-    const channelMap = path.join(folder, 'conventional-digital-scan.csv');
+    const dsdScan = plan.engine === 'dsd';
+    const channelMap = path.join(folder, dsdScan ? 'conventional-dsd-neo-scan.csv' : 'conventional-digital-scan.csv');
     scanningCount = digitalMemories.length;
-    const rows = ['ChannelNumber(dec),frequency(Hz) (do not delete this line or it will not import properly)', ...digitalMemories.map((channel,index) => `${index + 1},${channel.frequency},${String(channel.name).replace(/[\r\n,]+/g, ' ')}`)];
+    const modeFor = channel => ({ AM:'am', NFM:'nfm', P25:'p25', DMR:'dmr', NXDN:channel.nxdnMode === 'NXDN96' ? 'nxdn96' : 'nxdn48', 'D-STAR':'dstar', YSF:'ysf', M17:'m17' })[channel.mode];
+    const optionsFor = channel => channel.mode === 'NFM' ? '--nfm-bandwidth-hz 12500 --squelch noise+6'
+      : channel.mode === 'AM' ? '--am-bandwidth-hz 10000 --squelch auto+6' : '';
+    const rows = dsdScan
+      ? ['channel,frequency_hz,name,mode,options', ...digitalMemories.map((channel,index) => `${index + 1},${channel.frequency},${String(channel.name).replace(/[\r\n,]+/g, ' ').slice(0, 60)},${modeFor(channel)},${optionsFor(channel)}`)]
+      : ['ChannelNumber(dec),frequency(Hz) (do not delete this line or it will not import properly)', ...digitalMemories.map((channel,index) => `${index + 1},${channel.frequency},${String(channel.name).replace(/[\r\n,]+/g, ' ')}`)];
     fs.writeFileSync(channelMap, rows.join('\r\n') + '\r\n', 'utf8');
-    args.push('-Y', '-t', plan.rapid ? '0' : '1', '-C', channelMap);
+    args.push('-Y', '-t', dsdScan ? (plan.dwellMs / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : plan.rapid ? '0' : '1', '-C', channelMap);
   }
   await stopHd();
   if (receiver) await stopReceiver({ keepScan: body.hybridScan === true });
@@ -950,7 +958,7 @@ async function launchDigital(body, generation) {
     if (digitalSession) await digitalSession.stop();
     const mono = flags.some(flag => ['-f1', '-fi', '-fn', '-fd', '-fy', '-fz'].includes(flag));
     activeDigitalConfig = { mode: protocol, ...digitalOptions(config) };
-    const session = new DigitalDecoder({ args, channels: mono ? 1 : 2, dataDir: path.join(DATA_DIR, 'digital'), protocol: protocolLabel(config), config: activeDigitalConfig, frequency: freq });
+    const session = new DigitalDecoder({ args, channels: mono ? 1 : 2, dataDir: path.join(DATA_DIR, 'digital'), protocol: decoderLabel, config: activeDigitalConfig, frequency: freq });
     digitalSession = session; digitalHistory = []; lastDigitalBroadcast = 0;
     activeFrequency = freq; appMode = protocol; selectedChannelId = trunked?.id || memory?.id || null;
     session.on('audio', ({ samples, level }) => {
@@ -976,7 +984,18 @@ async function launchDigital(body, generation) {
       if (state.metrics?.tuner_gain_is_auto === true) activeGain = 0;
       else if (Number.isFinite(state.metrics?.tuner_gain_tenth_db)) activeGain = state.metrics.tuner_gain_tenth_db;
       if (digitalScan) {
-        digitalScan.channel = plan.channels.find(channel => channel.frequency === activeFrequency) || null;
+        const scanRow = state.decoderStatus?.scan_row;
+        const targetId = Number(scanRow?.target_id), rowNumber = Number(scanRow?.row);
+        const byRow = plan?.engine === 'dsd' && Number.isInteger(rowNumber) ? plan.channels[rowNumber] || null : null;
+        const byTarget = plan?.engine === 'dsd' ? plan.channels.find((channel,index) => targetId === index + 1) : null;
+        const byLabel = plan?.engine === 'dsd' && scanRow?.label ? plan.channels.find(channel => channel.name === scanRow.label) : null;
+        const byFrequency = plan?.channels.find(item => item.frequency === activeFrequency) || null;
+        const channel = byRow || byTarget || byLabel || byFrequency || null;
+        if (channel) {
+          if (digitalScan.channel?.id !== channel.id) digitalScan.hops = (digitalScan.hops || 0) + 1;
+          digitalScan.channel = channel;
+          activeFrequency = channel.frequency; appMode = channel.mode; selectedChannelId = channel.id;
+        }
         digitalScan.holding = state.calls.some(call => call.state === 2);
       }
       if (scanner?.active && scanner.plan.engine === 'hybrid' && DIGITAL_MODES.has(scanner.current?.mode)) {
@@ -1016,9 +1035,9 @@ async function launchDigital(body, generation) {
     try {
       await session.start();
       if (generation !== digitalGeneration) { await session.stop(); throw new Error('Decoder start cancelled.'); }
-      if (plan) digitalScan = { active: true, engine: 'digital', rapid: plan.rapid, dwellMs: plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: plan.channels[0] };
+      if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: plan.channels[0], hops: 0 };
       broadcast({ type: 'status', status: status() });
-      return { active: true, engine: 'integrated', protocol, protocolLabel: protocolLabel(config), frequency: activeFrequency,
+      return { active: true, engine: 'integrated', protocol, protocolLabel: decoderLabel, frequency: activeFrequency,
         channel: trunked?.name || null, site: selectedSite?.name || null, scanning: scanningCount || null, scan: digitalScan, digital: session.snapshot() };
     } catch (error) {
       digitalScan = null; lastDigitalState = session.snapshot();
@@ -1046,7 +1065,7 @@ async function launchDigital(body, generation) {
     await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   } catch (err) { throw new Error(`Could not start DSD-FME: ${err.message}`); }
   activeFrequency = freq; appMode = MODES.has(protocol) ? protocol : 'P25'; selectedChannelId = trunked?.id || null;
-  if (plan) digitalScan = { active: true, engine: 'digital', rapid: plan.rapid, dwellMs: plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: null };
+  if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: null, hops: 0 };
   broadcast({ type: 'status', status: status() });
   return { active: true, protocol, protocolLabel: protocolLabel(config), frequency: freq, channel: trunked?.name || null, site: selectedSite?.name || null, scanning: scanningCount || null, scan: digitalScan, note: 'DSD-FME owns the dongle while this decoder is running.' };
 }
