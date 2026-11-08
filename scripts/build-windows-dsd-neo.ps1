@@ -9,7 +9,14 @@ $manifestPath = Join-Path $repoRoot 'native/digital/manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $archive = Join-Path $repoRoot 'native/digital/source/dsd-neo-32ae7c8.zip'
 $expectedArchiveHash = [string]$manifest.sourceArchiveSha256
-$actualArchiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$archiveStream = [System.IO.File]::OpenRead($archive)
+try {
+    $actualArchiveHash = [System.BitConverter]::ToString($sha256.ComputeHash($archiveStream)).Replace('-', '').ToLowerInvariant()
+} finally {
+    $archiveStream.Dispose()
+    $sha256.Dispose()
+}
 if ($actualArchiveHash -ne $expectedArchiveHash) {
     throw "Pinned DSD-neo source archive hash mismatch: expected $expectedArchiveHash, got $actualArchiveHash."
 }
