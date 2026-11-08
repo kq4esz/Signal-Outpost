@@ -10,7 +10,7 @@ import { waterfallPixelFrequency, snapWaterfallFrequency } from './lib/waterfall
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const DIGITAL = new Set(['P25', 'DMR', 'NXDN', 'D-STAR', 'YSF', 'M17']);
-const DSD_SCAN_MODES = new Set([...DIGITAL, 'AM', 'NFM']);
+const DSD_SCAN_MODES = new Set([...DIGITAL, 'AM', 'NFM', 'WFM']);
 const MODE_HINTS = { AM:'Amplitude modulation · airband & broadcast', NFM:'Narrow FM · voice', WFM:'Wide FM · broadcast', USB:'Upper sideband · HF voice', LSB:'Lower sideband · HF voice', CW:'Morse code · built-in decoder', RAW:'Raw IQ audio · monitor only', P25:'P25 voice · integrated decoder', DMR:'DMR voice · integrated decoder', NXDN:'NXDN voice · integrated decoder', 'D-STAR':'D-STAR voice · integrated decoder', YSF:'System Fusion · integrated decoder', M17:'M17 voice · integrated decoder' };
 const MODE_LABELS = { NFM:'Narrow FM', WFM:'Wide FM', AM:'AM', USB:'Upper sideband', LSB:'Lower sideband', CW:'CW', RAW:'RAW IQ', P25:'P25', DMR:'DMR', NXDN:'NXDN', 'D-STAR':'D-STAR', YSF:'YSF', M17:'M17' };
 const state = { status:null, channels:[], settings:{}, usbDevices:[], platform:'unknown', network:null, page:'radio', spectrum:null, sampleRate:48000, currentStep:25000, audio:null, socket:null, volume:.72, muted:false, scanning:false, ft8:false, cwText:'', activity:[], spectrumRaf:0, waterfallRows:0, selectedTrunkId:'', lastError:'' };
@@ -76,6 +76,7 @@ function renderStatus() {
   const connected = Boolean(status.connected), digital = Boolean(status.digitalActive), hd = Boolean(status.hdActive);
   const integrated = digital && status.digital?.engine === 'integrated';
   const dsdScan = digital && status.scan?.engine === 'dsd';
+  const analogDsdRow = dsdScan && ['AM','NFM','WFM'].includes(status.scan?.channel?.mode);
   if (!connected && !integrated && !hd) { $('#audio-state').textContent = digital ? 'External decoder audio' : 'Audio stopped'; $('#audio-meter').style.width = '0%'; }
   receiverState.classList.toggle('connected', connected || digital || hd);
   $('#receiver-state-label').textContent = hd ? status.hd?.audioSource==='fm'?'FM fallback active':'HD Radio active' : dsdScan ? 'DSD-neo scan active' : digital ? 'Digital decoder active' : connected ? 'Receiver connected' : 'Receiver offline';
@@ -86,10 +87,10 @@ function renderStatus() {
   $('#connect-button .listen-label').textContent = hd ? 'Stop HD Radio' : digital ? 'Stop decoder' : connected ? 'Stop listening' : $('#mode-select').value === 'HD' ? 'Listen in HD' : DIGITAL.has($('#mode-select').value) ? 'Start decoder' : 'Start listening';
   $('#connect-button .listen-symbol').textContent = connected || digital || hd ? '■' : '▶';
   renderSpectrumStatus();
-  $('#source-label').textContent = hd ? status.hd?.audioSource==='fm'?`FM main program · HD${(status.hd?.program || 0) + 1} recovery active · USB`:`HD Radio · HD${(status.hd?.program || 0) + 1} · USB` : dsdScan ? 'NFM · AM · digital memory scan · DSD-neo · USB' : digital ? `Digital voice · ${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${status.rtlInfo?.product || 'RTL-SDR'} · ${status.rtlInfo?.tunerName || ''}` : 'Local USB receiver · RTL-SDR';
+  $('#source-label').textContent = hd ? status.hd?.audioSource==='fm'?`FM main program · HD${(status.hd?.program || 0) + 1} recovery active · USB`:`HD Radio · HD${(status.hd?.program || 0) + 1} · USB` : dsdScan ? 'NFM · AM · WFM · digital memory scan · DSD-neo · USB' : digital ? `Digital voice · ${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${status.rtlInfo?.product || 'RTL-SDR'} · ${status.rtlInfo?.tunerName || ''}` : 'Local USB receiver · RTL-SDR';
   $('.tune-source').classList.toggle('connected', connected || digital || hd);
   $('#gain-label').textContent = hd ? `HD ${status.hd?.gainMode==='auto'?'AUTO':'GAIN'} · ${Number((status.gain || 0) / 10).toFixed(1)} dB` : status.gain ? `GAIN ${Number(status.gain / 10).toFixed(1)} dB` : 'GAIN AUTO';
-  $('#sample-rate-label').textContent = hd ? '1.488375 MSPS · 48 kHz audio' : digital ? integrated ? '48 kHz DSP · 8 kHz voice' : 'DIGITAL USB' : `${((status.sampleRate || state.settings.sampleRate || 2400000) / 1e6).toFixed(1)} MSPS`;
+  $('#sample-rate-label').textContent = hd ? '1.488375 MSPS · 48 kHz audio' : digital ? integrated ? analogDsdRow ? '48 kHz mono · analog scan' : '48 kHz DSP · 8 kHz voice' : 'DIGITAL USB' : `${((status.sampleRate || state.settings.sampleRate || 2400000) / 1e6).toFixed(1)} MSPS`;
   const span = (status.sampleRate || 2400000) / 1e6;
   const center = Number(status.frequency || 100000000) / 1e6;
   if(!state.spectrum){$('#freq-left').textContent = (center - span / 2).toFixed(3);$('#freq-mid').textContent = `${center.toFixed(3)} MHz`;$('#freq-right').textContent = (center + span / 2).toFixed(3);}
@@ -473,7 +474,7 @@ function renderScanStatus() {
   const trunked=selected.length>0&&selected.every(channel=>channel.kind==='trunked');
   const mixed=selected.some(channel=>channel.kind==='trunked')&&!trunked;
   const digital=!trunked&&!mixed&&selected.length>0&&selected.every(channel=>DIGITAL.has(channel.mode));
-  const dsd=!trunked&&!mixed&&selected.length>0&&selected.every(channel=>DSD_SCAN_MODES.has(channel.mode))&&selected.some(channel=>['AM','NFM'].includes(channel.mode));
+  const dsd=!trunked&&!mixed&&selected.length>0&&selected.every(channel=>DSD_SCAN_MODES.has(channel.mode))&&selected.some(channel=>['AM','NFM','WFM'].includes(channel.mode));
   const hybrid=!trunked&&!mixed&&!dsd&&selected.some(channel=>DIGITAL.has(channel.mode))&&selected.some(channel=>!DIGITAL.has(channel.mode));
   const controls=trunked?selected.reduce((sum,channel)=>sum+trunkControlFrequencies(channel).length,0):0;
   const scanSpeed=$('#scan-speed');
@@ -494,7 +495,7 @@ function renderScanStatus() {
   if(!active){
     if(trunked){$('#memory-scan-status').textContent=`The integrated decoder will rotate through ${controls} saved primary / alternate control frequencies while keeping the RTL-SDR session open. One tuner checks them sequentially; calls can be missed while it is on another site.`;note.textContent='Choose 1–30 seconds per control frequency. Frequency changes retune the open tuner; selected systems must use matching decoder settings. Hold on an active signal keeps the decoder on a call until it ends.';}
     else if(digital){$('#memory-scan-status').textContent='Digital memories use native decoder scan timing and activity hold. Select a matching protocol group.';note.textContent='Digital selections use the integrated decoder. Group NXDN48 and NXDN96 separately. Trunked systems follow their site and talkgroups from Decoders.';}
-    else if(dsd){$('#memory-scan-status').textContent='NFM, AM, and digital memories can share one DSD-neo scan session.';note.textContent='DSD-neo keeps one RTL-SDR stream open, changes decoder mode from each memory, and holds analog carrier or digital calls. Choose the signal hangtime above. This scan requires Integrated DSD-neo in Settings.';}
+    else if(dsd){$('#memory-scan-status').textContent='NFM, AM, WFM, and digital memories can share one DSD-neo scan session.';note.textContent='DSD-neo keeps one RTL-SDR stream open, changes decoder mode from each memory, and holds analog carrier or digital calls. WFM uses a wider 256 kHz capture and mono broadcast audio. Choose the signal hangtime above. This scan requires Integrated DSD-neo in Settings.';}
     else if(hybrid){$('#memory-scan-status').textContent='Analog and digital memories can be scanned together in one sequence.';note.textContent='Mixed scans switch the single RTL-SDR between analog reception and the digital decoder. Dwell options start at 0.5 seconds; faster settings may miss brief digital calls. Receiver/decoder handoffs add time between channels. Hold on signal works for analog activity and integrated decoder calls.';}
     else {$('#memory-scan-status').textContent=mixed?'Clear the current selection, then choose either trunked systems or conventional memories.':'Select conventional memories using the checkboxes below. One USB tuner visits the selected frequencies in sequence.';note.textContent='Digital selections use the integrated decoder. Group NXDN48 and NXDN96 separately. Trunked systems follow their site and talkgroups from Decoders.';}
     return;
@@ -521,13 +522,13 @@ async function startSelectedScan() {
     const selected=state.channels.filter(channel=>state.scanSelection.has(channel.id)),trunked=selected.length>0&&selected.every(channel=>channel.kind==='trunked');
     if(!selected.length)throw new Error('Select at least one memory channel to scan.');
     if(selected.some(channel=>channel.kind==='trunked')&&!trunked)throw new Error('Select either trunked systems or conventional memories, not both.');
-    const dsd=selected.every(channel=>DSD_SCAN_MODES.has(channel.mode))&&selected.some(channel=>['AM','NFM'].includes(channel.mode));
-    if(dsd&&state.settings.digitalEngine==='external')throw new Error('NFM, AM, and digital mixed scans require Integrated DSD-neo in Settings.');
+    const dsd=selected.every(channel=>DSD_SCAN_MODES.has(channel.mode))&&selected.some(channel=>['AM','NFM','WFM'].includes(channel.mode));
+    if(dsd&&state.settings.digitalEngine==='external')throw new Error('NFM, AM, WFM, and digital mixed scans require Integrated DSD-neo in Settings.');
     if(state.settings.digitalEngine!=='external'&&(trunked||dsd||selected.some(channel=>DIGITAL.has(channel.mode))))await setupAudio();
     const dwellMs=Number($('#scan-speed').value),result=await api('/api/scan/start',{channelIds:selected.map(channel=>channel.id),rapid:dwellMs<500,dwellMs,holdOnSignal:$('#scan-hold').checked,holdMs:Number($('#scan-hang').value)});
     const digitalChannel=DIGITAL.has(result.scan.channel?.mode),decoderScan=['digital','dsd'].includes(result.scan.engine);
     state.status={...(state.status||{}),scannerActive:true,scan:result.scan,digitalActive:result.scan.engine==='trunked'||decoderScan||(result.scan.engine==='hybrid'&&digitalChannel),connected:result.scan.engine==='native'||(result.scan.engine==='hybrid'&&!digitalChannel),frequency:result.scan.channel?.frequency||state.status?.frequency,mode:result.scan.channel?.mode||state.status?.mode};
-    renderStatus();toast(trunked?`Scanning ${result.scan.controlCount} trunked control frequencies.`:result.scan.engine==='dsd'?`Scanning ${result.scan.channelCount} NFM, AM, and digital memories with DSD-neo.`:result.scan.engine==='hybrid'?`Scanning ${result.scan.channelCount} analog and digital memories.`:`Scanning ${result.scan.channelCount} selected memories.`,'success');
+    renderStatus();toast(trunked?`Scanning ${result.scan.controlCount} trunked control frequencies.`:result.scan.engine==='dsd'?`Scanning ${result.scan.channelCount} NFM, AM, WFM, and digital memories with DSD-neo.`:result.scan.engine==='hybrid'?`Scanning ${result.scan.channelCount} analog and digital memories.`:`Scanning ${result.scan.channelCount} selected memories.`,'success');
   }catch(error){toast(error.message,'error');}
   finally{renderScanStatus();}
 }

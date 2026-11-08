@@ -910,7 +910,7 @@ async function launchDigital(body, generation) {
   if (trunked && !selectedSite) throw new Error('This trunked system has no imported sites.');
   const plan = body.scanMemories ? body.scanPlan || scanPlan(channels, { channelIds: body.channelIds || channels.filter(channel => channel.kind !== 'trunked' && channel.enabled !== false && DIGITAL_MODES.has(channel.mode)).map(channel => channel.id), rapid: body.rapid === true }) : null;
   if (plan && !['digital', 'dsd'].includes(plan.engine)) throw new Error('Select digital conventional memories for the digital scanner.');
-  if (plan?.engine === 'dsd' && !integrated) throw new Error('NFM, AM, and digital mixed scans require the bundled DSD-neo decoder. Select Integrated DSD-neo in Settings.');
+  if (plan?.engine === 'dsd' && !integrated) throw new Error('NFM, AM, WFM, and digital mixed scans require the bundled DSD-neo decoder. Select Integrated DSD-neo in Settings.');
   if (!integrated && !body.path && !settings.dsdPath) throw new Error('Select the DSD-FME executable in Settings first.');
   const config = plan?.engine === 'dsd' ? resolveProtocol('P25') : plan?.profile || resolveProtocol(body.protocol, trunked || memory || {});
   const protocol = config.mode;
@@ -926,7 +926,8 @@ async function launchDigital(body, generation) {
   }
   if (integrated && Number(settings.directSampling)) throw new Error('DSD-neo scanning requires quadrature sampling. Choose Quadrature in USB hardware settings.');
   const requestedGain = integrated ? Math.min(49, Math.round(Number(settings.tunerGain || 0) / 10)) : Number(settings.tunerGain || 0) / 10;
-  const input = `rtl:${deviceIndex}:${freq}:${requestedGain}:${Number(settings.ppm) || 0}:${integrated ? 48 : protocol === 'NXDN' && config.nxdnMode !== 'NXDN96' ? 8 : 12}:0:2`;
+  const scanBandwidth = plan?.channels.some(channel => channel.mode === 'WFM') ? 256 : 48;
+  const input = `rtl:${deviceIndex}:${freq}:${requestedGain}:${Number(settings.ppm) || 0}:${integrated ? scanBandwidth : protocol === 'NXDN' && config.nxdnMode !== 'NXDN96' ? 8 : 12}:0:2`;
   const args = ['-i', input + (integrated ? `:bias=${settings.biasTee ? 'on' : 'off'}` : ''), ...flags];
   let scanningCount = 0;
   if (trunked) {
@@ -941,9 +942,10 @@ async function launchDigital(body, generation) {
     const dsdScan = plan.engine === 'dsd';
     const channelMap = path.join(folder, dsdScan ? 'conventional-dsd-neo-scan.csv' : 'conventional-digital-scan.csv');
     scanningCount = digitalMemories.length;
-    const modeFor = channel => ({ AM:'am', NFM:'nfm', P25:'p25', DMR:'dmr', NXDN:channel.nxdnMode === 'NXDN96' ? 'nxdn96' : 'nxdn48', 'D-STAR':'dstar', YSF:'ysf', M17:'m17' })[channel.mode];
+    const modeFor = channel => ({ AM:'am', NFM:'nfm', WFM:'wfm', P25:'p25', DMR:'dmr', NXDN:channel.nxdnMode === 'NXDN96' ? 'nxdn96' : 'nxdn48', 'D-STAR':'dstar', YSF:'ysf', M17:'m17' })[channel.mode];
     const optionsFor = channel => channel.mode === 'NFM' ? '--nfm-bandwidth-hz 12500 --squelch noise+6'
-      : channel.mode === 'AM' ? '--am-bandwidth-hz 10000 --squelch auto+6' : '';
+      : channel.mode === 'AM' ? '--am-bandwidth-hz 10000 --squelch auto+6'
+      : channel.mode === 'WFM' ? `--wfm-bandwidth-hz 180000 --squelch auto+6` : '';
     const rows = dsdScan
       ? ['channel,frequency_hz,name,mode,options', ...digitalMemories.map((channel,index) => `${index + 1},${channel.frequency},${String(channel.name).replace(/[\r\n,]+/g, ' ').slice(0, 60)},${modeFor(channel)},${optionsFor(channel)}`)]
       : ['ChannelNumber(dec),frequency(Hz) (do not delete this line or it will not import properly)', ...digitalMemories.map((channel,index) => `${index + 1},${channel.frequency},${String(channel.name).replace(/[\r\n,]+/g, ' ')}`)];
@@ -957,8 +959,12 @@ async function launchDigital(body, generation) {
   if (integrated) {
     if (digitalSession) await digitalSession.stop();
     const mono = flags.some(flag => ['-f1', '-fi', '-fn', '-fd', '-fy', '-fz'].includes(flag));
+    const decoderChannels = mono ? 1 : 2;
+    const firstAnalog = plan?.engine === 'dsd' && ['AM', 'NFM', 'WFM'].includes(plan.channels[0]?.mode);
+    const inputAudioChannels = firstAnalog ? 1 : decoderChannels;
+    const inputAudioRateHz = firstAnalog ? 48000 : 8000;
     activeDigitalConfig = { mode: protocol, ...digitalOptions(config) };
-    const session = new DigitalDecoder({ args, channels: mono ? 1 : 2, dataDir: path.join(DATA_DIR, 'digital'), protocol: decoderLabel, config: activeDigitalConfig, frequency: freq });
+    const session = new DigitalDecoder({ args, channels: inputAudioChannels, inputRateHz: inputAudioRateHz, dataDir: path.join(DATA_DIR, 'digital'), protocol: decoderLabel, config: activeDigitalConfig, frequency: freq });
     digitalSession = session; digitalHistory = []; lastDigitalBroadcast = 0;
     activeFrequency = freq; appMode = protocol; selectedChannelId = trunked?.id || memory?.id || null;
     session.on('audio', ({ samples, level }) => {
@@ -992,6 +998,10 @@ async function launchDigital(body, generation) {
         const byFrequency = plan?.channels.find(item => item.frequency === activeFrequency) || null;
         const channel = byRow || byTarget || byLabel || byFrequency || null;
         if (channel) {
+          if (plan?.engine === 'dsd') {
+            const analogAudio = ['AM', 'NFM', 'WFM'].includes(channel.mode);
+            session.setAudioFormat(analogAudio ? 1 : decoderChannels, analogAudio ? 48000 : 8000);
+          }
           if (digitalScan.channel?.id !== channel.id) digitalScan.hops = (digitalScan.hops || 0) + 1;
           digitalScan.channel = channel;
           activeFrequency = channel.frequency; appMode = channel.mode; selectedChannelId = channel.id;

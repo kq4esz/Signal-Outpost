@@ -16,6 +16,12 @@
   },
   "archiveSha256": "f8ef451c93c03266d009fa7f39c651acb791fe1839ba91f07def3978127e2b33",
   "sourceArchiveSha256": "937d170de7cfb5febdb2565b9dd9a32b8731b1d8cbfc4c1e30e5d4ee62f84831",
+  "sourcePatches": {
+    "wfm": {
+      "file": "patches/dsd-neo-wfm.patch",
+      "sha256": "98c274c3efa4ccd53cd5c1348784f5e30af1311e53e4efd79935e29460ad3335"
+    }
+  },
   "upstream": "https://github.com/arancormonk/dsd-neo",
   "source": "https://github.com/arancormonk/dsd-neo/tree/32ae7c8afba7bb8acbc95d1c6b4099db48d899a0",
   "license": "GPL-3.0-or-later"

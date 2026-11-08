@@ -59,6 +59,7 @@ unzip -q "$DSD_SOURCE_ARCHIVE" -d "$BUILD_ROOT/dsd-source"
 NRSC5_SOURCE="$BUILD_ROOT/nrsc5-source/nrsc5-3.2.0"
 DSD_SOURCE="$BUILD_ROOT/dsd-source/dsd-neo-32ae7c8afba7bb8acbc95d1c6b4099db48d899a0"
 [[ -n "$NRSC5_SOURCE" && -n "$DSD_SOURCE" ]] || { echo "Could not locate the pinned decoder source trees." >&2; exit 1; }
+node "$ROOT_DIR/scripts/apply-dsd-neo-source-patches.mjs" "$DSD_SOURCE"
 
 # Build the same pinned, Blog V4-capable RTL-SDR source and codec dependency
 # used by Linux; the app and both decoders share this private macOS driver.

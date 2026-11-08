@@ -26,9 +26,15 @@ jobs:
         with:
           node-version: '24'
           cache: pnpm
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+      - name: Set up the pinned DSD-neo vcpkg baseline
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build Windows installer
+      - name: Build Windows installer and WFM-enabled decoder
         run: pnpm build:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

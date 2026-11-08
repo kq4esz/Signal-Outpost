@@ -1,0 +1,243 @@
+diff --git a/include/dsd-neo/runtime/scan_mode.h b/include/dsd-neo/runtime/scan_mode.h
+index 2b0fc72..5b12668 100644
+--- a/include/dsd-neo/runtime/scan_mode.h
++++ b/include/dsd-neo/runtime/scan_mode.h
+@@ -33 +33,3 @@ typedef enum {
+-    DSD_SCAN_MODE_AM
++    DSD_SCAN_MODE_AM,
++    /** Analog wideband FM monitor for broadcast channels; uses the FM discriminator with a broadcast-width passband. */
++    DSD_SCAN_MODE_WFM
+@@ -38 +40 @@ typedef enum {
+-#define DSD_SCAN_MODE_LAST DSD_SCAN_MODE_AM
++#define DSD_SCAN_MODE_LAST DSD_SCAN_MODE_WFM
+@@ -124 +126 @@ const char* dsd_scan_mode_name(dsd_scan_mode mode);
+-/** Nonzero for an analog class (NFM, AM): no frames, keys, talkgroups or symbol clock, and activity is carrier. */
++/** Nonzero for an analog class (NFM, AM, WFM): no frames, keys, talkgroups or symbol clock, and activity is carrier. */
+@@ -126,2 +128,3 @@ int dsd_scan_mode_is_analog(dsd_scan_mode mode);
+-/** The analog demodulator (dsd_analog_demod) an analog class runs: DSD_ANALOG_DEMOD_FM for NFM, DSD_ANALOG_DEMOD_AM for
+- * AM; -1 for any other class. It names the channel width a row of the class runs, and the one its own width sets. */
++/** The analog demodulator (dsd_analog_demod) an analog class runs: DSD_ANALOG_DEMOD_FM for NFM and WFM,
++ * DSD_ANALOG_DEMOD_AM for AM; -1 for any other class. It names the channel width a row of the class runs, and the one
++ * its own width sets. */
+diff --git a/src/runtime/scan_mode.c b/src/runtime/scan_mode.c
+index 942b5eb..a802eb3 100644
+--- a/src/runtime/scan_mode.c
++++ b/src/runtime/scan_mode.c
+@@ -54 +54 @@ static const char* const mode_names[] = {"",      "p25", "dmr", "nxdn96", "nxdn4
+-                                         "dstar", "ysf", "m17", "nfm",    "am"};
++                                         "dstar", "ysf", "m17", "nfm",    "am", "wfm"};
+@@ -57 +57 @@ static const dsdneoUserDecodeMode mode_presets[] = {
+-    DSDCFG_MODE_DSTAR, DSDCFG_MODE_YSF,  DSDCFG_MODE_M17, DSDCFG_MODE_ANALOG, DSDCFG_MODE_AM};
++    DSDCFG_MODE_DSTAR, DSDCFG_MODE_YSF,  DSDCFG_MODE_M17, DSDCFG_MODE_ANALOG, DSDCFG_MODE_AM, DSDCFG_MODE_ANALOG};
+@@ -77 +77,2 @@ dsd_scan_mode_analog_kind(dsd_scan_mode mode) {
+-        case DSD_SCAN_MODE_NFM: return DSD_ANALOG_DEMOD_FM;
++        case DSD_SCAN_MODE_NFM:
++        case DSD_SCAN_MODE_WFM: return DSD_ANALOG_DEMOD_FM;
+@@ -122 +123 @@ dsd_scan_mode_alias_hint(const char* text) {
+-    static const char* const analog_fm[] = {"fm", "analog", "wfm", "nbfm", "fm-conventional"};
++    static const char* const analog_fm[] = {"fm", "analog", "nbfm", "fm-conventional"};
+diff --git a/src/runtime/scan_options.c b/src/runtime/scan_options.c
+index e33222d..84e974b 100644
+--- a/src/runtime/scan_options.c
++++ b/src/runtime/scan_options.c
+@@ -24,0 +25 @@
++#define WFM           MODE_BIT(DSD_SCAN_MODE_WFM)
+@@ -28 +29 @@
+-#define ANALOG_MODES  (NFM | AM)
++#define ANALOG_MODES  (NFM | AM | WFM)
+@@ -97 +98 @@ static int option_set_path(const scan_option_spec* spec, const char* argument, u
+-    "expects whole Hz from " OPTION_HZ(DSD_ANALOG_NFM_WIDTH_MIN_HZ) " to " OPTION_HZ(DSD_ANALOG_NFM_WIDTH_MAX_HZ)
++    "expects whole Hz from " OPTION_HZ(DSD_ANALOG_NFM_WIDTH_MIN_HZ) " to " OPTION_HZ(DSD_ANALOG_NFM_SCAN_WIDTH_MAX_HZ)
+@@ -99,0 +101,2 @@ static int option_set_path(const scan_option_spec* spec, const char* argument, u
++#define WFM_BANDWIDTH_HINT                                                                                             \
++    "expects whole Hz from " OPTION_HZ(DSD_ANALOG_WFM_WIDTH_MIN_HZ) " to " OPTION_HZ(DSD_ANALOG_WFM_WIDTH_MAX_HZ)
+@@ -143,0 +147 @@ static const scan_option_spec specifications[] = {
++    {"--wfm-bandwidth-hz", DSD_SCAN_OPT_BANDWIDTH, WFM, 1, 0, 0, 0, WFM_BANDWIDTH_HINT, option_set_bandwidth},
+@@ -456,0 +461,5 @@ option_set_bandwidth(const scan_option_spec* spec, const char* argument, unsigne
++    if ((mode == DSD_SCAN_MODE_WFM
++         && (width_hz < DSD_ANALOG_WFM_WIDTH_MIN_HZ || width_hz > DSD_ANALOG_WFM_WIDTH_MAX_HZ))
++        || (mode == DSD_SCAN_MODE_NFM && width_hz > DSD_ANALOG_NFM_SCAN_WIDTH_MAX_HZ)) {
++        return -1;
++    }
+@@ -862,0 +872,6 @@ dsd_scan_option_width_check(unsigned int mode, const dsd_scan_option_values* val
++    if ((mode == DSD_SCAN_MODE_NFM && values->channel_bw_hz > DSD_ANALOG_NFM_SCAN_WIDTH_MAX_HZ)
++        || (mode == DSD_SCAN_MODE_WFM
++            && (values->channel_bw_hz < DSD_ANALOG_WFM_WIDTH_MIN_HZ
++                || values->channel_bw_hz > DSD_ANALOG_WFM_WIDTH_MAX_HZ))) {
++        return option_error(error, error_size, "bandwidth", "is outside the selected analog mode's range");
++    }
+diff --git a/include/dsd-neo/runtime/analog_channel.h b/include/dsd-neo/runtime/analog_channel.h
+index 368f2ff..ae3e7f0 100644
+--- a/include/dsd-neo/runtime/analog_channel.h
++++ b/include/dsd-neo/runtime/analog_channel.h
+@@ -19,2 +19,4 @@
+- * The transition is the window-method design parameter, not a stopband guarantee: the response is about -0.3 dB at
+- * width/2, about -30 dB at width/2 + 1200 Hz, and -50 dB or better only from about width/2 + 1450 Hz.
++ * WFM uses the same FM discriminator but has its own 12 kHz channel-filter transition at DSP rates of 128 kHz and
++ * above. The NFM/AM design keeps its 1200 Hz transition. The transition is the window-method design parameter, not a
++ * stopband guarantee: the response is about -0.3 dB at width/2, about -30 dB halfway through its transition, and -50 dB
++ * or better only beyond the transition.
+@@ -53 +55,2 @@ typedef enum dsd_rx_family {
+-#define DSD_ANALOG_NFM_WIDTH_MAX_HZ              25000
++#define DSD_ANALOG_NFM_WIDTH_MAX_HZ              200000
++#define DSD_ANALOG_NFM_SCAN_WIDTH_MAX_HZ         25000
+@@ -54,0 +58,3 @@ typedef enum dsd_rx_family {
++#define DSD_ANALOG_WFM_WIDTH_MIN_HZ              160000
++#define DSD_ANALOG_WFM_WIDTH_MAX_HZ              200000
++#define DSD_ANALOG_WFM_WIDTH_DEFAULT_HZ          180000
+@@ -63,0 +70,2 @@ typedef enum dsd_rx_family {
++#define DSD_ANALOG_WFM_CHANNEL_TRANSITION_HZ     12000 /**< WFM channel filter transition. */
++#define DSD_ANALOG_WFM_CHANNEL_GUARD_HZ          6000  /**< WFM cutoff = width/2 + half the transition. */
+@@ -140 +148 @@ int dsd_analog_width_max_for_rate(int rate_hz);
+-#define DSD_ANALOG_RTL_DSP_BW_MAX_KHZ 48
++#define DSD_ANALOG_RTL_DSP_BW_MAX_KHZ 256
+@@ -142 +150 @@ int dsd_analog_width_max_for_rate(int rate_hz);
+-/** @brief Return 1 when @p khz is a selectable RTL DSP bandwidth (rtl_bw_khz): 4, 6, 8, 12, 16, 24 or 48 kHz. */
++/** @brief Return 1 when @p khz is a selectable RTL DSP bandwidth (rtl_bw_khz): 4, 6, 8, 12, 16, 24, 48 or 256 kHz. */
+diff --git a/src/runtime/analog_channel.c b/src/runtime/analog_channel.c
+index 113ff32..1091ffb 100644
+--- a/src/runtime/analog_channel.c
++++ b/src/runtime/analog_channel.c
+@@ -21 +21 @@
+-static const int kRtlDspBandwidthsKhz[] = {4, 6, 8, 12, 16, 24, DSD_ANALOG_RTL_DSP_BW_MAX_KHZ};
++static const int kRtlDspBandwidthsKhz[] = {4, 6, 8, 12, 16, 24, 48, DSD_ANALOG_RTL_DSP_BW_MAX_KHZ};
+@@ -178 +178,3 @@ dsd_analog_channel_taps_for_rate(int rate_hz) {
+-    const int64_t denominator = (int64_t)22 * (int64_t)DSD_ANALOG_CHANNEL_TRANSITION_HZ;
++    const int transition_hz = rate_hz >= 128000 ? DSD_ANALOG_WFM_CHANNEL_TRANSITION_HZ
++                                                 : DSD_ANALOG_CHANNEL_TRANSITION_HZ;
++    const int64_t denominator = (int64_t)22 * (int64_t)transition_hz;
+@@ -192,2 +194,2 @@ dsd_analog_width_realizable(int width_hz, int rate_hz) {
+-    const int64_t lhs =
+-        (int64_t)DSD_ANALOG_CHANNEL_CUTOFF_RATE_DEN * ((int64_t)width_hz + 2 * (int64_t)DSD_ANALOG_CHANNEL_GUARD_HZ);
++    const int guard_hz = rate_hz >= 128000 ? DSD_ANALOG_WFM_CHANNEL_GUARD_HZ : DSD_ANALOG_CHANNEL_GUARD_HZ;
++    const int64_t lhs = (int64_t)DSD_ANALOG_CHANNEL_CUTOFF_RATE_DEN * ((int64_t)width_hz + 2 * (int64_t)guard_hz);
+@@ -208 +210 @@ dsd_analog_width_max_for_rate(int rate_hz) {
+-        - 2 * (int64_t)DSD_ANALOG_CHANNEL_GUARD_HZ;
++        - 2 * (int64_t)(rate_hz >= 128000 ? DSD_ANALOG_WFM_CHANNEL_GUARD_HZ : DSD_ANALOG_CHANNEL_GUARD_HZ);
+diff --git a/src/dsp/demod_pipeline.cpp b/src/dsp/demod_pipeline.cpp
+index d85949b..3587de0 100644
+--- a/src/dsp/demod_pipeline.cpp
++++ b/src/dsp/demod_pipeline.cpp
+@@ -528,3 +528,5 @@ dsd_channel_lpf_design_analog(int rate_hz, int width_hz, float* taps_out, int ma
+-    const double cutoff_hz = (double)width_hz * 0.5 + kChannelLpfGuardHz;
+-    return dsd_firdes_low_pass(1.0, (double)rate_hz, cutoff_hz, kChannelLpfTransitionHz, DSD_WIN_BLACKMAN, taps_out,
+-                               max_taps);
++    const double transition_hz = rate_hz >= 128000 ? (double)DSD_ANALOG_WFM_CHANNEL_TRANSITION_HZ
++                                                    : kChannelLpfTransitionHz;
++    const double guard_hz = transition_hz * 0.5;
++    const double cutoff_hz = (double)width_hz * 0.5 + guard_hz;
++    return dsd_firdes_low_pass(1.0, (double)rate_hz, cutoff_hz, transition_hz, DSD_WIN_BLACKMAN, taps_out, max_taps);
+diff --git a/include/dsd-neo/dsp/analog_voice.h b/include/dsd-neo/dsp/analog_voice.h
+index 8e04138..ab81265 100644
+--- a/include/dsd-neo/dsp/analog_voice.h
++++ b/include/dsd-neo/dsp/analog_voice.h
+@@ -34,0 +35,2 @@ typedef enum {
++    /** WFM's broadcast-audio low-pass at 15 kHz, with no narrowband voice high-pass. */
++    DSD_VOICE_BAND_WFM = 3,
+diff --git a/src/dsp/analog_voice.c b/src/dsp/analog_voice.c
+index 00e73ac..48250c6 100644
+--- a/src/dsp/analog_voice.c
++++ b/src/dsp/analog_voice.c
+@@ -34,0 +35 @@ static const double k_lp_hz = 3400.0;
++static const double k_wfm_lp_hz = 15000.0;
+@@ -103 +104,2 @@ dsd_voice_bandpass_design(dsd_voice_bandpass* bp, dsd_voice_band_kind kind, int
+-    if (!bp || (kind != DSD_VOICE_BAND_FM && kind != DSD_VOICE_BAND_AM && kind != DSD_VOICE_BAND_LOWPASS)) {
++    if (!bp || (kind != DSD_VOICE_BAND_FM && kind != DSD_VOICE_BAND_AM && kind != DSD_VOICE_BAND_LOWPASS
++                && kind != DSD_VOICE_BAND_WFM)) {
+@@ -122 +124,2 @@ dsd_voice_bandpass_design(dsd_voice_bandpass* bp, dsd_voice_band_kind kind, int
+-    if (k_lp_hz < limit) {
++    const double lowpass_hz = kind == DSD_VOICE_BAND_WFM ? k_wfm_lp_hz : k_lp_hz;
++    if (lowpass_hz < limit) {
+@@ -124 +127 @@ dsd_voice_bandpass_design(dsd_voice_bandpass* bp, dsd_voice_band_kind kind, int
+-            rbj_section(&bp->sec[bp->sections++], 0, k_lp_hz, k_butterworth4_q[i], rate_hz);
++            rbj_section(&bp->sec[bp->sections++], 0, lowpass_hz, k_butterworth4_q[i], rate_hz);
+diff --git a/src/dsp/analog_audio.c b/src/dsp/analog_audio.c
+index bda91e0..cb30252 100644
+--- a/src/dsp/analog_audio.c
++++ b/src/dsp/analog_audio.c
+@@ -16,0 +17 @@
++#include <dsd-neo/runtime/scan_mode.h>
+@@ -53,0 +55 @@ typedef struct {
++    double wfm_deemphasis_state;
+@@ -109 +111,5 @@ static dsd_voice_band_kind
+-analog_audio_band(const dsd_opts* opts, dsd_analog_audio_chain chain, dsd_analog_audio_source source) {
++analog_audio_band(const dsd_opts* opts, const dsd_state* state, dsd_analog_audio_chain chain,
++                  dsd_analog_audio_source source) {
++    if (chain == DSD_ANALOG_AUDIO_CHAIN_MONITOR && dsd_scan_mode_active(state) == DSD_SCAN_MODE_WFM) {
++        return DSD_VOICE_BAND_WFM;
++    }
+@@ -142,0 +149 @@ analog_audio_chain_configure(analog_audio_chain_state* cs, dsd_voice_band_kind b
++    cs->wfm_deemphasis_state = 0.0;
+@@ -152,2 +159,4 @@ static void
+-analog_audio_run_filters(const dsd_opts* opts, analog_audio_chain_state* cs, float* buf, size_t n) {
+-    if (opts->use_pbf == 1) {
++analog_audio_run_filters(const dsd_opts* opts, const dsd_state* state, analog_audio_chain_state* cs, float* buf,
++                         size_t n) {
++    const int wfm = dsd_scan_mode_active(state) == DSD_SCAN_MODE_WFM;
++    if (wfm || opts->use_pbf == 1) {
+@@ -156 +165,11 @@ analog_audio_run_filters(const dsd_opts* opts, analog_audio_chain_state* cs, flo
+-    if (opts->use_lpf == 1) {
++    if (wfm) {
++        const double rate_hz = cs->rate_hz > 0 ? (double)cs->rate_hz : 48000.0;
++        const double alpha = 1.0 - exp(-1.0 / (rate_hz * 75.0e-6));
++        double previous = cs->wfm_deemphasis_state;
++        for (size_t i = 0; i < n; i++) {
++            previous += alpha * ((double)buf[i] - previous);
++            buf[i] = (float)previous;
++        }
++        cs->wfm_deemphasis_state = previous;
++    }
++    if (!wfm && opts->use_lpf == 1) {
+@@ -159 +178 @@ analog_audio_run_filters(const dsd_opts* opts, analog_audio_chain_state* cs, flo
+-    if (opts->use_hpf == 1) {
++    if (!wfm && opts->use_hpf == 1) {
+@@ -243,2 +262,2 @@ dsd_analog_audio_process_f(const dsd_opts* opts, dsd_state* state, dsd_analog_au
+-    analog_audio_chain_configure(cs, analog_audio_band(opts, chain, source), source, rate_hz, &now);
+-    analog_audio_run_filters(opts, cs, buf, n);
++    analog_audio_chain_configure(cs, analog_audio_band(opts, state, chain, source), source, rate_hz, &now);
++    analog_audio_run_filters(opts, state, cs, buf, n);
+diff --git a/src/io/radio/rtl_sdr_fm.cpp b/src/io/radio/rtl_sdr_fm.cpp
+index 9f75c87..66fe85c 100644
+--- a/src/io/radio/rtl_sdr_fm.cpp
++++ b/src/io/radio/rtl_sdr_fm.cpp
+@@ -2495 +2495,5 @@ monitor_output_scale(const struct demod_state* d) {
+-    return d->output_scale * ((float)rate_hz / kMonitorScaleReferenceRateHz);
++    const float wfm_gain = (d->analog_family && d->analog_demod == DSD_ANALOG_DEMOD_FM
++                            && d->analog_width_request_hz >= DSD_ANALOG_WFM_WIDTH_MIN_HZ)
++                               ? (1.0f / 25.0f)
++                               : 1.0f;
++    return d->output_scale * ((float)rate_hz / kMonitorScaleReferenceRateHz) * wfm_gain;
+diff --git a/include/dsd-neo/runtime/input_spec.h b/include/dsd-neo/runtime/input_spec.h
+index 9015d24..62be199 100644
+--- a/include/dsd-neo/runtime/input_spec.h
++++ b/include/dsd-neo/runtime/input_spec.h
+@@ -52 +52 @@ int dsd_normalize_soapy_input_spec(dsd_opts* opts, int* out_tuning_applied);
+- * the frequency (Hz, or with a k/M/G suffix), the tuner gain, the PPM, the DSP bandwidth (4, 6, 8, 12, 16, 24 or 48
++ * the frequency (Hz, or with a k/M/G suffix), the tuner gain, the PPM, the DSP bandwidth (4, 6, 8, 12, 16, 24, 48 or 256
+@@ -64 +64 @@ int dsd_rtl_input_spec_apply(dsd_opts* opts);
+- * @brief The DSP bandwidth a spec's bandwidth field @p token names, in kHz: 4, 6, 8, 12, 16, 24 or 48, and 48 for
++ * @brief The DSP bandwidth a spec's bandwidth field @p token names, in kHz: 4, 6, 8, 12, 16, 24, 48 or 256, and 48 for
+diff --git a/src/runtime/input_spec.c b/src/runtime/input_spec.c
+index 4c73b65..fa4cfd4 100644
+--- a/src/runtime/input_spec.c
++++ b/src/runtime/input_spec.c
+@@ -24 +24 @@ is_valid_rtl_bw_khz(int bw) {
+-    return (bw == 4 || bw == 6 || bw == 8 || bw == 12 || bw == 16 || bw == 24 || bw == 48);
++    return (bw == 4 || bw == 6 || bw == 8 || bw == 12 || bw == 16 || bw == 24 || bw == 48 || bw == 256);
+@@ -404 +404 @@ dsd_rtl_spec_bw_khz_or_default(const char* token) {
+-    if (bw == 4 || bw == 6 || bw == 8 || bw == 12 || bw == 16 || bw == 24 || bw == 48) {
++    if (bw == 4 || bw == 6 || bw == 8 || bw == 12 || bw == 16 || bw == 24 || bw == 48 || bw == 256) {
+diff --git a/src/runtime/config_schema.c b/src/runtime/config_schema.c
+index 8a6b9a4..1ec1df7 100644
+--- a/src/runtime/config_schema.c
++++ b/src/runtime/config_schema.c
+@@ -28 +28 @@ static const dsdcfg_schema_entry_t s_schema[] = {
+-    {"input", "rtl_bw_khz", "RTL-SDR DSP bandwidth in kHz", "48", NULL, DSDCFG_TYPE_INT, 4, 48},
++    {"input", "rtl_bw_khz", "RTL-SDR DSP bandwidth in kHz", "48", NULL, DSDCFG_TYPE_INT, 4, 256},
+diff --git a/src/ui/terminal/menu_callbacks.c b/src/ui/terminal/menu_callbacks.c
+index 7fb49b5..b27b570 100644
+--- a/src/ui/terminal/menu_callbacks.c
++++ b/src/ui/terminal/menu_callbacks.c
+@@ -1063 +1063 @@ cb_rtl_bw(void* u, int ok, int bw) {
+-        const int allowed[] = {4, 6, 8, 12, 16, 24, 48};
++        const int allowed[] = {4, 6, 8, 12, 16, 24, 48, 256};

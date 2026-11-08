@@ -49,6 +49,7 @@ unzip -q "$DSD_SOURCE_ARCHIVE" -d "$BUILD_ROOT/dsd-source"
 NRSC5_SOURCE="$(find "$BUILD_ROOT/nrsc5-source" -mindepth 1 -maxdepth 1 -type d -name 'nrsc5-*' -print -quit)"
 DSD_SOURCE="$(find "$BUILD_ROOT/dsd-source" -mindepth 1 -maxdepth 1 -type d -name 'dsd-neo-*' -print -quit)"
 [[ -n "$NRSC5_SOURCE" && -n "$DSD_SOURCE" ]] || { echo "Could not locate the pinned decoder source trees." >&2; exit 1; }
+node "$ROOT_DIR/scripts/apply-dsd-neo-source-patches.mjs" "$DSD_SOURCE"
 
 # DSD-neo's pinned dependency file supplies the V4-capable RTL-SDR and codec
 # commits. Building them beside the app keeps the runtime independent of an
