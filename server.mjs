@@ -954,6 +954,10 @@ async function launchDigital(body, generation) {
   const scanBandwidth = plan?.channels.some(channel => channel.mode === 'WFM') ? 256 : 48;
   const input = `rtl:${deviceIndex}:${freq}:${requestedGain}:${Number(settings.ppm) || 0}:${integrated ? scanBandwidth : protocol === 'NXDN' && config.nxdnMode !== 'NXDN96' ? 8 : 12}:0:2`;
   const args = ['-i', input + (integrated ? `:bias=${settings.biasTee ? 'on' : 'off'}` : ''), ...flags];
+  if (integrated && plan) {
+    const voiceWindowMs = Math.max(100, plan.dwellMs || 0);
+    args.push('--scan-voice-only', '--scan-voice-qualify-ms', String(voiceWindowMs), '--scan-voice-hold-ms', String(voiceWindowMs));
+  }
   let scanningCount = 0;
   if (trunked) {
     const folder = integrated && body.trunkedScan && trunkedScanner?.mapDirectory
