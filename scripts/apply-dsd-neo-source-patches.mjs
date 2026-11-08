@@ -20,24 +20,30 @@ if (path.basename(sourceRoot) !== `dsd-neo-${manifest.commit}` || !fs.existsSync
 }
 
 const patchPath = path.join(repoRoot, 'native/digital', patch.file);
-const patchHash = createHash('sha256').update(fs.readFileSync(patchPath)).digest('hex');
+const patchText = fs.readFileSync(patchPath, 'utf8').replace(/\r\n/g, '\n');
+const patchHash = createHash('sha256').update(patchText, 'utf8').digest('hex');
 if (patchHash !== patch.sha256) {
   throw new Error(`Pinned DSD-neo WFM patch hash mismatch: expected ${patch.sha256}, got ${patchHash}.`);
 }
 
 const gitDir = path.join(sourceRoot, '.git');
+const normalizedPatchPath = path.join(sourceRoot, '.signal-outpost-dsd-neo-wfm.patch');
 if (fs.existsSync(gitDir)) {
   throw new Error(`Refusing to patch a source tree that already contains Git metadata: ${sourceRoot}`);
 }
 
 let initialized = false;
 try {
+  // Git for Windows may check the repository patch out with CRLF line endings. Apply
+  // a normalized copy so the patch hash and git apply input are platform-independent.
+  fs.writeFileSync(normalizedPatchPath, patchText, 'utf8');
   // The source archive hash pins this zero-context patch to the exact upstream revision on every platform.
   execFileSync('git', ['init', '--quiet', sourceRoot], { stdio: 'inherit' });
   initialized = true;
-  execFileSync('git', ['-C', sourceRoot, 'apply', '--unidiff-zero', '--check', patchPath], { stdio: 'inherit' });
-  execFileSync('git', ['-C', sourceRoot, 'apply', '--unidiff-zero', patchPath], { stdio: 'inherit' });
+  execFileSync('git', ['-C', sourceRoot, 'apply', '--unidiff-zero', '--check', normalizedPatchPath], { stdio: 'inherit' });
+  execFileSync('git', ['-C', sourceRoot, 'apply', '--unidiff-zero', normalizedPatchPath], { stdio: 'inherit' });
 } finally {
+  fs.rmSync(normalizedPatchPath, { force: true });
   if (initialized) fs.rmSync(gitDir, { recursive: true, force: true });
 }
 
