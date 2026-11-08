@@ -397,7 +397,7 @@ function trunkedScanSnapshot(scan = trunkedScanner) {
   const entry = scan.current;
   return { active: scan.active, engine: 'trunked', channelIds: scan.channelIds, channelCount: scan.systemCount,
     controlCount: scan.entries.length, dwellMs: scan.dwellMs, holdOnSignal: scan.holdOnSignal, holdMs: scan.holdMs, index: scan.index, total: scan.entries.length,
-    hops: scan.hops, holding: scan.holding, activity: scan.activity,
+    hops: scan.hops, holding: scan.holding, paused: scan.paused, activity: scan.activity,
     current: entry ? { channelId: entry.channel.id, systemName: entry.channel.name, siteId: entry.site.id,
       siteName: entry.site.name, frequency: entry.frequency, role: entry.role, mode: entry.channel.mode } : null,
     channel: entry ? { id: entry.channel.id, name: entry.channel.name, frequency: entry.frequency, mode: entry.channel.mode } : null };
@@ -437,7 +437,7 @@ async function startTrunkedScanEntry(scan, index) {
     if (scan.resumeTimer) clearTimeout(scan.resumeTimer);
     scan.resumeTimer = null;
     const entry = scan.entries[index];
-    scan.index = index; scan.current = entry; scan.activity = 'Starting decoder'; scan.holding = false;
+    scan.index = index; scan.current = entry; scan.activity = 'Starting decoder'; scan.holding = false; scan.callActive = false;
     activeFrequency = entry.frequency; appMode = entry.channel.mode; selectedChannelId = entry.channel.id;
     broadcast({ type: 'status', status: status() });
     if (digitalSession?.active) await retuneTrunkedScanEntry(scan, entry);
@@ -446,8 +446,8 @@ async function startTrunkedScanEntry(scan, index) {
       await stopDigital({ keepTrunkedScan: true });
       return;
     }
-    scan.activity = scan.holding ? 'Voice call active' : 'Monitoring control channel'; scan.hops++;
-    if (!scan.holding) scan.timer = setTimeout(() => { void advanceTrunkedScan(scan).catch(() => {}); }, scan.dwellMs);
+    scan.activity = scan.paused ? 'Paused on current control channel' : scan.holding ? 'Voice call active' : 'Monitoring control channel'; scan.hops++;
+    if (!scan.holding && !scan.paused) scan.timer = setTimeout(() => { void advanceTrunkedScan(scan).catch(() => {}); }, scan.dwellMs);
     broadcast({ type: 'status', status: status() });
   } catch (error) {
     if (trunkedScanner === scan) await stopTrunkedScan({ error: scan.hops ? error.message : '', stopDecoder: true });
@@ -455,13 +455,38 @@ async function startTrunkedScanEntry(scan, index) {
   } finally { scan.busy = false; }
 }
 
-async function advanceTrunkedScan(scan = trunkedScanner) {
-  if (!scan?.active || trunkedScanner !== scan || scan.busy) return;
+async function advanceTrunkedScan(scan = trunkedScanner, force = false) {
+  if (!scan?.active || trunkedScanner !== scan || (scan.paused && !force) || scan.busy) return;
   if (scan.timer) clearTimeout(scan.timer);
   if (scan.resumeTimer) clearTimeout(scan.resumeTimer);
   scan.timer = null;
   scan.resumeTimer = null;
   try { await startTrunkedScanEntry(scan, (scan.index + 1) % scan.entries.length); } catch {}
+}
+
+function setTrunkedScanPaused(scan, paused) {
+  if (!scan?.active || trunkedScanner !== scan) throw new Error('Start a trunked scan before pausing it.');
+  if (scan.paused === paused) return;
+  scan.paused = paused;
+  if (scan.timer) clearTimeout(scan.timer);
+  if (scan.resumeTimer) clearTimeout(scan.resumeTimer);
+  scan.timer = null;
+  scan.resumeTimer = null;
+  if (paused) {
+    scan.activity = scan.holding ? scan.callActive ? 'Paused during voice call' : 'Paused after voice call' : 'Paused on current control channel';
+  } else if (!scan.busy && scan.holding && scan.callActive) {
+    scan.activity = 'Voice call active';
+  } else if (!scan.busy && scan.holding) {
+    scan.activity = 'Call ended · waiting to resume';
+    scan.resumeTimer = setTimeout(() => {
+      if (trunkedScanner !== scan || !scan.active || scan.paused) return;
+      scan.holding = false; scan.resumeTimer = null; void advanceTrunkedScan(scan);
+    }, scan.holdMs);
+  } else if (!scan.busy) {
+    scan.activity = 'Resuming scan';
+    void advanceTrunkedScan(scan);
+  }
+  broadcast({ type: 'status', status: status() });
 }
 
 async function startTrunkedScan(body) {
@@ -477,7 +502,7 @@ async function startTrunkedScan(body) {
   const scan = { active: true, channelIds: plan.ids, systemCount: plan.systems.length, entries: plan.entries,
     dwellMs: requested, holdOnSignal: body.holdOnSignal !== false, holdMs: Math.max(250, Math.min(10000, Number(body.holdMs) || 1500)),
     mapDirectory: fs.mkdtempSync(path.join(DATA_DIR, 'trunked-scan-')),
-    index: -1, hops: 0, holding: false, activity: 'Starting decoder', current: null, busy: false, timer: null, resumeTimer: null };
+    index: -1, hops: 0, holding: false, paused: false, callActive: false, activity: 'Starting decoder', current: null, busy: false, timer: null, resumeTimer: null };
   trunkedScanner = scan;
   try {
     await startTrunkedScanEntry(scan, 0);
@@ -1013,7 +1038,14 @@ async function launchDigital(body, generation) {
       }
       if (trunkedScanner?.active && trunkedScanner.current) {
         const scan = trunkedScanner, callActive = state.calls.some(call => call.state === 2);
-        if (!scan.holdOnSignal) {
+        scan.callActive = callActive;
+        if (scan.paused) {
+          if (scan.holdOnSignal && callActive) scan.holding = true;
+          if (scan.timer) clearTimeout(scan.timer);
+          if (scan.resumeTimer) clearTimeout(scan.resumeTimer);
+          scan.timer = null; scan.resumeTimer = null;
+          scan.activity = scan.holding ? callActive ? 'Paused during voice call' : 'Paused after voice call' : 'Paused on current control channel';
+        } else if (!scan.holdOnSignal) {
           scan.holding = false;
           scan.activity = callActive ? 'Voice call active · scan continues' : state.decoderStatus?.trunking ? 'Control channel locked' : 'Monitoring control channel';
         } else if (callActive) {
@@ -1023,7 +1055,7 @@ async function launchDigital(body, generation) {
         } else if (scan.holding) {
           scan.activity = 'Call ended · waiting to resume';
           if (!scan.resumeTimer) scan.resumeTimer = setTimeout(() => {
-            if (trunkedScanner !== scan || !scan.active) return;
+            if (trunkedScanner !== scan || !scan.active || scan.paused) return;
             scan.holding = false; scan.resumeTimer = null; void advanceTrunkedScan(scan);
           }, scan.holdMs);
         } else scan.activity = state.decoderStatus?.trunking ? 'Control channel locked' : 'Monitoring control channel';
@@ -1045,7 +1077,7 @@ async function launchDigital(body, generation) {
     try {
       await session.start();
       if (generation !== digitalGeneration) { await session.stop(); throw new Error('Decoder start cancelled.'); }
-      if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: plan.channels[0], hops: 0 };
+      if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, paused: false, channel: plan.channels[0], hops: 0 };
       broadcast({ type: 'status', status: status() });
       return { active: true, engine: 'integrated', protocol, protocolLabel: decoderLabel, frequency: activeFrequency,
         channel: trunked?.name || null, site: selectedSite?.name || null, scanning: scanningCount || null, scan: digitalScan, digital: session.snapshot() };
@@ -1075,7 +1107,7 @@ async function launchDigital(body, generation) {
     await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   } catch (err) { throw new Error(`Could not start DSD-FME: ${err.message}`); }
   activeFrequency = freq; appMode = MODES.has(protocol) ? protocol : 'P25'; selectedChannelId = trunked?.id || null;
-  if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, channel: null, hops: 0 };
+  if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, paused: false, channel: null, hops: 0 };
   broadcast({ type: 'status', status: status() });
   return { active: true, protocol, protocolLabel: protocolLabel(config), frequency: freq, channel: trunked?.name || null, site: selectedSite?.name || null, scanning: scanningCount || null, scan: digitalScan, note: 'DSD-FME owns the dongle while this decoder is running.' };
 }
@@ -1168,6 +1200,21 @@ const server = http.createServer(async (req, res) => {
       channels[index] = { ...channels[index], ...normalizeChannel({ ...channels[index], ...b, id }, false) }; writeJson(CHANNELS_FILE, channels); return sendJson(res, 200, channels[index]);
     }
     if (url.pathname === '/api/scan/start' && req.method === 'POST') return sendJson(res, 200, await startScan(await parseBody(req)));
+    if (url.pathname === '/api/scan/pause' && req.method === 'POST') {
+      const body = await parseBody(req);
+      if (typeof body.paused !== 'boolean') throw new Error('Choose whether to pause or resume scanning.');
+      if (scanner?.active) {
+        if (body.paused) scanner.pause(); else await scanner.resume();
+      } else if (trunkedScanner?.active) {
+        setTrunkedScanPaused(trunkedScanner, body.paused);
+      } else if (digitalScan?.active) {
+        if (!digitalSession?.active) throw new Error('Pause and resume require the integrated DSD-neo decoder.');
+        if (Boolean(digitalScan.paused) !== body.paused) await digitalSession.request('scan_hold_toggle');
+        digitalScan.paused = body.paused;
+        broadcast({ type: 'status', status: status() });
+      } else throw new Error('Start a memory scan before pausing it.');
+      return sendJson(res, 200, status());
+    }
     if (url.pathname === '/api/scan/stop' && req.method === 'POST') {
       const body = await parseBody(req);
       const scan = scanner?.active ? scanner.snapshot() : null;
@@ -1181,7 +1228,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, status());
     }
     if (url.pathname === '/api/scan/skip' && req.method === 'POST') {
-      if (trunkedScanner?.active) await advanceTrunkedScan();
+      if (trunkedScanner?.active) await advanceTrunkedScan(trunkedScanner, true);
       else if (digitalScan && digitalSession?.active) await digitalSession.request('channel_cycle');
       else { if (!scanner?.active) throw new Error('Start a memory scan before skipping.'); await scanner.skip(); }
       return sendJson(res, 200, status());

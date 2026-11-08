@@ -490,7 +490,9 @@ function renderScanStatus() {
   $('#scan-select-visible').textContent=selectTrunked?'Select visible trunked systems':'Select visible conventional';
   $('#scan-selected').textContent=trunked?'▶ Scan control channels':'▶ Scan selected';
   $('#scan-selected').disabled=active||state.scanSelection.size===0||mixed;$('#scan-stop').disabled=!active;$('#scan-skip').disabled=!active||!(['native','hybrid','trunked'].includes(scan?.engine)||state.status?.digital?.engine==='integrated');
-  $('#memory-scan-status').classList.toggle('holding',Boolean(scan?.holding));
+  const pauseSupported=active&&(['native','hybrid','trunked'].includes(scan?.engine)||(['digital','dsd'].includes(scan?.engine)&&state.settings.digitalEngine!=='external'));
+  const pauseButton=$('#scan-pause');pauseButton.disabled=!pauseSupported;pauseButton.textContent=scan?.paused?'▶ Resume scan':'Ⅱ Pause scan';pauseButton.setAttribute('aria-pressed',String(Boolean(scan?.paused)));
+  $('#memory-scan-status').classList.toggle('holding',Boolean(scan?.holding||scan?.paused));
   const note=$('.scan-digital-note');
   if(!active){
     if(trunked){$('#memory-scan-status').textContent=`The integrated decoder will rotate through ${controls} saved primary / alternate control frequencies while keeping the RTL-SDR session open. One tuner checks them sequentially; calls can be missed while it is on another site.`;note.textContent='Choose 1–30 seconds per control frequency. Frequency changes retune the open tuner; selected systems must use matching decoder settings. Hold on an active signal keeps the decoder on a call until it ends.';}
@@ -502,19 +504,19 @@ function renderScanStatus() {
   }
   if(scan.engine==='trunked'){
     const current=scan.current;
-    $('#memory-scan-status').textContent=`Trunked control scan · ${scan.index+1}/${scan.total} · ${current?.systemName||'System'} / ${current?.siteName||'Site'} · ${formatMHz(current?.frequency||0,6)} MHz · ${scan.activity||'Monitoring'} · ${scan.dwellMs/1000}s per frequency`;
+    $('#memory-scan-status').textContent=`Trunked control scan · ${scan.index+1}/${scan.total} · ${current?.systemName||'System'} / ${current?.siteName||'Site'} · ${formatMHz(current?.frequency||0,6)} MHz · ${scan.paused?'Paused on current channel':scan.activity||'Monitoring'} · ${scan.dwellMs/1000}s per frequency`;
   }else if(scan.engine==='hybrid'){
     const level=scan.holding&&Number.isFinite(scan.signalDb)?` · +${scan.signalDb} dB over nearby noise`:'';
-    $('#memory-scan-status').textContent=`Analog / digital scan · ${scan.channelCount} selected · ${scan.dwellMs/1000}s minimum dwell · ${scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
+    $('#memory-scan-status').textContent=`Analog / digital scan · ${scan.channelCount} selected · ${scan.dwellMs/1000}s minimum dwell · ${scan.paused?'Paused on':scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
   }else if(scan.engine==='dsd'){
     const hang=scan.dwellMs===0?'no hangtime':`${(scan.dwellMs/1000).toFixed(scan.dwellMs%1000?2:0)}s signal hangtime`;
-    $('#memory-scan-status').textContent=`DSD-neo mixed-mode scan · ${scan.channelCount} selected · ${hang} · ${scan.channel?.name||'Starting'} · ${scan.hops||0} visits`;
+    $('#memory-scan-status').textContent=`DSD-neo mixed-mode scan · ${scan.channelCount} selected · ${hang} · ${scan.paused?'Paused on ':''}${scan.channel?.name||'Starting'} · ${scan.hops||0} visits`;
   }else{
     const kind=scan.engine==='digital'?'Digital decoder scan':scan.rapid?'Rapid scan':'Memory scan';
     const level=scan.holding&&Number.isFinite(scan.signalDb)?` · +${scan.signalDb} dB over nearby noise`:'';
-    $('#memory-scan-status').textContent=scan.engine==='digital'?`${kind} · ${scan.channelCount} selected memories · ${scan.rapid?'fastest decoder timing':'1 second dwell'}${scan.channel ? ' · '+scan.channel.name : ''} · see Decoders for activity`:`${kind} · ${scan.channelCount} selected · ${scan.dwellMs} ms dwell · ${scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
+    $('#memory-scan-status').textContent=scan.engine==='digital'?`${kind} · ${scan.channelCount} selected memories · ${scan.rapid?'fastest decoder timing':'1 second dwell'}${scan.channel ? ` · ${scan.paused?'Paused on ':''}${scan.channel.name}` : ''} · see Decoders for activity`:`${kind} · ${scan.channelCount} selected · ${scan.dwellMs} ms dwell · ${scan.paused?'Paused on':scan.holding?'Listening to':'Checking'} ${scan.channel?.name||'receiver'} · ${scan.hops||0} visits${level}`;
   }
-  $('#memory-scan-status').classList.toggle('holding',Boolean(scan.holding));
+  $('#memory-scan-status').classList.toggle('holding',Boolean(scan.holding||scan.paused));
 }
 async function startSelectedScan() {
   $('#scan-selected').disabled=true;
@@ -1013,6 +1015,7 @@ function bindEvents() {
   $('#scan-select-visible').addEventListener('click',()=>{const selectedTrunked=state.channels.some(channel=>state.scanSelection.has(channel.id)&&channel.kind==='trunked');const trunked=selectedTrunked||(!state.scanSelection.size&&$('#channel-filter').value==='trunked');$$('[data-scan-id]:not(:disabled)').forEach(input=>{const channel=state.channels.find(item=>item.id===input.dataset.scanId);if(channel&&(channel.kind==='trunked')===trunked)state.scanSelection.add(channel.id);});renderChannelRows();});
   $('#scan-clear-selection').addEventListener('click',()=>{state.scanSelection.clear();renderChannelRows();});
   $('#scan-selected').addEventListener('click',startSelectedScan);
+  $('#scan-pause').addEventListener('click',async()=>{const paused=!state.scan?.paused;try{state.status=await api('/api/scan/pause',{paused});renderStatus();toast(paused?`Paused on ${state.scan?.channel?.name||'the current channel'}.`:'Scan resumed.','success');}catch(error){toast(error.message,'error');}});
   $('#scan-stop').addEventListener('click',async()=>{try{state.status=await api('/api/scan/stop',{});await stopAudio();renderStatus();toast('Scan and live RF stopped.');}catch(error){toast(error.message,'error');}});
   $('#scan-skip').addEventListener('click',async()=>{try{state.status=await api('/api/scan/skip',{});renderStatus();}catch(error){toast(error.message,'error');}});
   $$('[data-page]').forEach(button=>button.addEventListener('click',()=>setPage(button.dataset.page)));
