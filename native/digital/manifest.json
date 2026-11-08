@@ -19,7 +19,7 @@
   "sourcePatches": {
     "wfm": {
       "file": "patches/dsd-neo-wfm.patch",
-      "sha256": "98c274c3efa4ccd53cd5c1348784f5e30af1311e53e4efd79935e29460ad3335"
+      "sha256": "6747e29fb7837180b3aa97e2d409402ba2da7b233fb00f057dd5518ed190feec"
     }
   },
   "upstream": "https://github.com/arancormonk/dsd-neo",

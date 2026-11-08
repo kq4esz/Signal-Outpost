@@ -204,7 +204,7 @@ index 9f75c87..66fe85c 100644
 -    return d->output_scale * ((float)rate_hz / kMonitorScaleReferenceRateHz);
 +    const float wfm_gain = (d->analog_family && d->analog_demod == DSD_ANALOG_DEMOD_FM
 +                            && d->analog_width_request_hz >= DSD_ANALOG_WFM_WIDTH_MIN_HZ)
-+                               ? (1.0f / 25.0f)
++                               ? (1.0f / 8.0f)
 +                               : 1.0f;
 +    return d->output_scale * ((float)rate_hz / kMonitorScaleReferenceRateHz) * wfm_gain;
 diff --git a/include/dsd-neo/runtime/input_spec.h b/include/dsd-neo/runtime/input_spec.h
