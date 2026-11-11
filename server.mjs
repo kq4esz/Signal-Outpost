@@ -14,6 +14,7 @@ import { normalizeMemory } from './lib/memory-channels.mjs';
 import { MemoryScanner, scanPlan, spectrumSnr } from './lib/memory-scanner.mjs';
 import { DigitalDecoder, digitalRuntime } from './lib/digital-decoder.mjs';
 import { HdRadio, hdRuntime } from './lib/hd-radio.mjs';
+import { RF_WINDOW_BYTES, spectrumFromCu8 } from './lib/rf-spectrum.mjs';
 import { hdBandForFrequency, hdProgram } from './lib/hd-options.mjs';
 import { MeshCoreClient, meshcoreCatalog } from './lib/meshcore.mjs';
 import { Propagation } from './lib/propagation.mjs';
@@ -67,7 +68,6 @@ let sampleRate = 2400000;
 let wfmWorker = null, wfmPendingBytes = 0, wfmGeneration = 0;
 let rtlInfo = null;
 let lastSpectrumAt = 0;
-let spectrumRefreshCounter = 0;
 let recentDecodes = [];
 let clients = new Set();
 const meshcore = new MeshCoreClient(DATA_DIR);
@@ -151,11 +151,11 @@ async function tune(freq) {
 }
 
 let phaseI = 1, phaseQ = 0, previousI = 0, previousQ = 0, havePrevious = false;
-let decimationCount = 0, audioAccumulator = 0, audioSamples = [], spectrumI = new Float32Array(1024), spectrumQ = new Float32Array(1024), spectrumCount = 0;
+let decimationCount = 0, audioAccumulator = 0, audioSamples = [], spectrumBuffer = Buffer.alloc(RF_WINDOW_BYTES), spectrumByteCount = 0;
 let dcInput = 0, dcOutput = 0, rmsSum = 0, rmsCount = 0;
 function resetDsp() {
   phaseI = 1; phaseQ = 0; previousI = 0; previousQ = 0; havePrevious = false;
-  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0;
+  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumByteCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0;
   wfmGeneration++;
   if (wfmWorker) {
     if (appMode === 'WFM' && receiver) wfmWorker.postMessage({ rate: sampleRate, generation: wfmGeneration });
@@ -163,7 +163,7 @@ function resetDsp() {
       const worker = wfmWorker; wfmWorker = null; wfmPendingBytes = 0; void worker.terminate();
     }
   }
-  spectrumRefreshCounter = 0;
+  lastSpectrumAt = 0;
   cwState = { unit: 100, keyed: false, markMs: 0, gapMs: 0, pattern: '', text: '', noise: 0.008, peak: 0.04, envelope: 0 };
 }
 function cwEmitCharacter() {
@@ -203,46 +203,22 @@ function decodeCw(samples) {
     if (!cwState.keyed && cwState.gapMs >= cwState.unit * 3.4 && cwState.pattern) cwEmitCharacter();
   }
 }
-function fft(real, imag) {
-  const n = real.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) { [real[i], real[j]] = [real[j], real[i]]; [imag[i], imag[j]] = [imag[j], imag[i]]; }
+function captureSpectrum(buffer) {
+  for (let sourceOffset = 0; sourceOffset < buffer.length;) {
+    const length = Math.min(RF_WINDOW_BYTES - spectrumByteCount, buffer.length - sourceOffset);
+    buffer.copy(spectrumBuffer, spectrumByteCount, sourceOffset, sourceOffset + length);
+    spectrumByteCount += length; sourceOffset += length;
+    if (spectrumByteCount < RF_WINDOW_BYTES) continue;
+    spectrumByteCount = 0;
+    const now = Date.now();
+    if (now - lastSpectrumAt < 50) continue;
+    const bins = spectrumFromCu8(spectrumBuffer);
+    if (!bins) continue;
+    broadcastSpectrum({ type: 'spectrum', source: 'usb', bins, center: activeFrequency, tunedFrequency: activeFrequency,
+      span: sampleRate, timestamp: now, epoch: `usb:${activeFrequency}:${sampleRate}`, units: 'dBFS' });
+    if (scanner?.active) scanner.observe(spectrumSnr(bins, sampleRate, appMode));
+    lastSpectrumAt = now;
   }
-  for (let len = 2; len <= n; len <<= 1) {
-    const angle = -2 * Math.PI / len, wr0 = Math.cos(angle), wi0 = Math.sin(angle);
-    for (let i = 0; i < n; i += len) {
-      let wr = 1, wi = 0;
-      for (let j = 0; j < len / 2; j++) {
-        const uR = real[i + j], uI = imag[i + j];
-        const vR = real[i + j + len / 2] * wr - imag[i + j + len / 2] * wi;
-        const vI = real[i + j + len / 2] * wi + imag[i + j + len / 2] * wr;
-        real[i + j] = uR + vR; imag[i + j] = uI + vI;
-        real[i + j + len / 2] = uR - vR; imag[i + j + len / 2] = uI - vI;
-        const nextWr = wr * wr0 - wi * wi0; wi = wr * wi0 + wi * wr0; wr = nextWr;
-      }
-    }
-  }
-}
-function publishSpectrum() {
-  const n = spectrumI.length;
-  const re = new Float32Array(n), im = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
-    re[i] = spectrumI[i] * w; im[i] = spectrumQ[i] * w;
-  }
-  fft(re, im);
-  const half = n >> 1, bins = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const k = (i + half) % n;
-    const magnitude = Math.hypot(re[k], im[k]) / n;
-    bins[i] = Math.max(-100, Math.min(-8, 20 * Math.log10(Math.max(magnitude, 0.000003)) + 20));
-  }
-  broadcastSpectrum({ type: 'spectrum', source: 'usb', bins, center: activeFrequency, tunedFrequency: activeFrequency, span: sampleRate, timestamp: Date.now(), epoch: `usb:${activeFrequency}:${sampleRate}` });
-  if (scanner?.active) scanner.observe(spectrumSnr(bins, sampleRate, appMode));
-  spectrumCount = 0;
 }
 function flushAudio() {
   if (audioSamples.length < 4800) return;
@@ -284,6 +260,7 @@ function startWfmWorker() {
 }
 function processIq(buffer) {
   if (!receiver) return;
+  captureSpectrum(buffer);
   const factor = Math.max(1, Math.round(sampleRate / 48000));
   const outRate = sampleRate / factor;
   const wideFm = appMode === 'WFM';
@@ -309,7 +286,6 @@ function processIq(buffer) {
   const output = audioSamples;
   for (let p = 0; p + 1 < buffer.length; p += 2) {
     const rawI = (buffer[p] - 127.5) / 127.5, rawQ = (buffer[p + 1] - 127.5) / 127.5;
-    if (spectrumCount < spectrumI.length) { spectrumI[spectrumCount] = rawI; spectrumQ[spectrumCount] = rawQ; spectrumCount++; }
     let sample;
     if (wideFm) {
       sample = 0;
@@ -342,11 +318,6 @@ function processIq(buffer) {
         rmsSum += audio * audio; rmsCount++;
         audioAccumulator = 0; decimationCount = 0;
       }
-    }
-    if (spectrumCount >= spectrumI.length && ++spectrumRefreshCounter >= 8192) {
-      spectrumRefreshCounter = 0;
-      const now = Date.now();
-      if (now - lastSpectrumAt >= 50) { publishSpectrum(); lastSpectrumAt = now; }
     }
   }
   phaseI = localPhaseI; phaseQ = localPhaseQ;
