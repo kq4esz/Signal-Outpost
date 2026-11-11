@@ -150,10 +150,10 @@ async function tune(freq) {
 
 let phaseI = 1, phaseQ = 0, previousI = 0, previousQ = 0, havePrevious = false;
 let decimationCount = 0, audioAccumulator = 0, audioSamples = [], spectrumI = new Float32Array(1024), spectrumQ = new Float32Array(1024), spectrumCount = 0;
-let dcInput = 0, dcOutput = 0, rmsSum = 0, rmsCount = 0;
+let dcInput = 0, dcOutput = 0, wfmDeemphasis = 0, rmsSum = 0, rmsCount = 0;
 function resetDsp() {
   phaseI = 1; phaseQ = 0; previousI = 0; previousQ = 0; havePrevious = false;
-  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0;
+  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0; wfmDeemphasis = 0;
   spectrumRefreshCounter = 0;
   cwState = { unit: 100, keyed: false, markMs: 0, gapMs: 0, pattern: '', text: '', noise: 0.008, peak: 0.04, envelope: 0 };
 }
@@ -239,6 +239,9 @@ function processIq(buffer) {
   if (!receiver) return;
   const factor = Math.max(1, Math.round(sampleRate / 48000));
   const outRate = sampleRate / factor;
+  const fmDeviationHz = appMode === 'WFM' ? 75000 : appMode === 'NFM' ? 5000 : 0;
+  const fmAudioScale = fmDeviationHz ? 0.72 * sampleRate / (2 * Math.PI * fmDeviationHz) : 0.7;
+  const wfmDeemphasisAlpha = appMode === 'WFM' ? Math.exp(-1 / (outRate * 75e-6)) : 0;
   const mix = ['USB', 'LSB', 'CW'].includes(appMode);
   const mixFrequency = appMode === 'CW' ? 700 : 1500;
   const direction = appMode === 'LSB' ? 1 : -1;
@@ -259,7 +262,7 @@ function processIq(buffer) {
       else {
         const cross = previousI * rawQ - previousQ * rawI;
         const dot = previousI * rawI + previousQ * rawQ;
-        sample = Math.atan2(cross, dot) * 0.7;
+        sample = Math.atan2(cross, dot) * fmAudioScale;
         previousI = rawI; previousQ = rawQ;
       }
     } else if (mix) {
@@ -274,6 +277,10 @@ function processIq(buffer) {
     decimationCount++;
     if (decimationCount >= factor) {
       let audio = audioAccumulator / factor;
+      if (appMode === 'WFM') {
+        audio = audio * (1 - wfmDeemphasisAlpha) + wfmDeemphasis * wfmDeemphasisAlpha;
+        wfmDeemphasis = audio;
+      }
       audio = Math.max(-1, Math.min(1, audio));
       output.push(audio);
       rmsSum += audio * audio; rmsCount++;
