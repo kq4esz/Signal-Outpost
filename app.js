@@ -74,23 +74,24 @@ function renderStatus() {
   state.ft8=Boolean(status.wsjtActive);$('#ft8-dot').classList.toggle('active',state.ft8);$('#ft8-state').textContent=state.ft8?'Listening for WSJT-X':'Bridge not started';$('#ft8-toggle').textContent=state.ft8?'Stop bridge':'Start bridge';$('#ft8-port').textContent=`UDP 127.0.0.1:${status.wsjtPort||state.settings.wsjtPort||2237}`;
   const receiverState = $('#receiver-state');
   const connected = Boolean(status.connected), digital = Boolean(status.digitalActive), hd = Boolean(status.hdActive);
+  const liveWfm = Boolean(status.digitalLiveWfm);
   const integrated = digital && status.digital?.engine === 'integrated';
   const dsdScan = digital && status.scan?.engine === 'dsd';
   const analogDsdRow = dsdScan && ['AM','NFM','WFM'].includes(status.scan?.channel?.mode);
   if (!connected && !integrated && !hd) { $('#audio-state').textContent = digital ? 'External decoder audio' : 'Audio stopped'; $('#audio-meter').style.width = '0%'; }
   receiverState.classList.toggle('connected', connected || digital || hd);
-  $('#receiver-state-label').textContent = hd ? status.hd?.audioSource==='fm'?'FM fallback active':'HD Radio active' : dsdScan ? 'DSD-neo scan active' : digital ? 'Digital decoder active' : connected ? 'Receiver connected' : 'Receiver offline';
-  $('#receiver-rate').textContent = hd ? 'HD Radio · USB' : dsdScan ? 'DSD-neo mixed mode · USB' : digital ? `${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${(status.sampleRate || 2400000) / 1e6} MSPS` : 'Direct USB';
+  $('#receiver-state-label').textContent = hd ? status.hd?.audioSource==='fm'?'FM fallback active':'HD Radio active' : liveWfm ? 'Live WFM · DSD-neo' : dsdScan ? 'DSD-neo scan active' : digital ? 'Digital decoder active' : connected ? 'Receiver connected' : 'Receiver offline';
+  $('#receiver-rate').textContent = hd ? 'HD Radio · USB' : liveWfm ? 'WFM broadcast audio · USB' : dsdScan ? 'DSD-neo mixed mode · USB' : digital ? `${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${(status.sampleRate || 2400000) / 1e6} MSPS` : 'Direct USB';
   $('#sidebar-device').classList.toggle('connected', connected || digital || hd);
-  $('#sidebar-device-state').textContent = hd ? 'HD Radio · USB' : dsdScan ? 'Mixed memory scan · USB' : digital ? 'Digital decoding · USB' : connected ? `${status.rtlInfo?.product || 'RTL-SDR'} · USB` : 'USB · Not connected';
+  $('#sidebar-device-state').textContent = hd ? 'HD Radio · USB' : liveWfm ? 'WFM · DSD-neo · USB' : dsdScan ? 'Mixed memory scan · USB' : digital ? 'Digital decoding · USB' : connected ? `${status.rtlInfo?.product || 'RTL-SDR'} · USB` : 'USB · Not connected';
   $('#connect-button').classList.toggle('connected', connected || digital || hd);
-  $('#connect-button .listen-label').textContent = hd ? 'Stop HD Radio' : digital ? 'Stop decoder' : connected ? 'Stop listening' : $('#mode-select').value === 'HD' ? 'Listen in HD' : DIGITAL.has($('#mode-select').value) ? 'Start decoder' : 'Start listening';
+  $('#connect-button .listen-label').textContent = hd ? 'Stop HD Radio' : liveWfm ? 'Stop listening' : digital ? 'Stop decoder' : connected ? 'Stop listening' : $('#mode-select').value === 'HD' ? 'Listen in HD' : DIGITAL.has($('#mode-select').value) ? 'Start decoder' : 'Start listening';
   $('#connect-button .listen-symbol').textContent = connected || digital || hd ? '■' : '▶';
   renderSpectrumStatus();
-  $('#source-label').textContent = hd ? status.hd?.audioSource==='fm'?`FM main program · HD${(status.hd?.program || 0) + 1} recovery active · USB`:`HD Radio · HD${(status.hd?.program || 0) + 1} · USB` : dsdScan ? 'NFM · AM · WFM · digital memory scan · DSD-neo · USB' : digital ? `Digital voice · ${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${status.rtlInfo?.product || 'RTL-SDR'} · ${status.rtlInfo?.tunerName || ''}` : 'Local USB receiver · RTL-SDR';
+  $('#source-label').textContent = hd ? status.hd?.audioSource==='fm'?`FM main program · HD${(status.hd?.program || 0) + 1} recovery active · USB`:`HD Radio · HD${(status.hd?.program || 0) + 1} · USB` : liveWfm ? 'WFM broadcast audio · DSD-neo demodulation · USB' : dsdScan ? 'NFM · AM · WFM · digital memory scan · DSD-neo · USB' : digital ? `Digital voice · ${integrated ? 'DSD-neo' : 'DSD-FME'} · USB` : connected ? `USB · ${status.rtlInfo?.product || 'RTL-SDR'} · ${status.rtlInfo?.tunerName || ''}` : 'Local USB receiver · RTL-SDR';
   $('.tune-source').classList.toggle('connected', connected || digital || hd);
   $('#gain-label').textContent = hd ? `HD ${status.hd?.gainMode==='auto'?'AUTO':'GAIN'} · ${Number((status.gain || 0) / 10).toFixed(1)} dB` : status.gain ? `GAIN ${Number(status.gain / 10).toFixed(1)} dB` : 'GAIN AUTO';
-  $('#sample-rate-label').textContent = hd ? '1.488375 MSPS · 48 kHz audio' : digital ? integrated ? analogDsdRow ? '48 kHz mono · analog scan' : '48 kHz DSP · 8 kHz voice' : 'DIGITAL USB' : `${((status.sampleRate || state.settings.sampleRate || 2400000) / 1e6).toFixed(1)} MSPS`;
+  $('#sample-rate-label').textContent = hd ? '1.488375 MSPS · 48 kHz audio' : liveWfm ? '48 kHz mono · DSD-neo WFM' : digital ? integrated ? analogDsdRow ? '48 kHz mono · analog scan' : '48 kHz DSP · 8 kHz voice' : 'DIGITAL USB' : `${((status.sampleRate || state.settings.sampleRate || 2400000) / 1e6).toFixed(1)} MSPS`;
   const span = (status.sampleRate || 2400000) / 1e6;
   const center = Number(status.frequency || 100000000) / 1e6;
   if(!state.spectrum){$('#freq-left').textContent = (center - span / 2).toFixed(3);$('#freq-mid').textContent = `${center.toFixed(3)} MHz`;$('#freq-right').textContent = (center + span / 2).toFixed(3);}
@@ -126,7 +127,7 @@ function renderDigital() {
   const external = active ? !integrated : state.settings.digitalEngine === 'external';
   if(!active&&state.selectedTrunkId){const channel=state.channels.find(item=>item.id===state.selectedTrunkId);const site=channel?.sites?.find(item=>String(item.id)===$('#digital-site').value)||channel?.sites?.[0];const frequency=site?.frequencies?.find(item=>item.use==='d')?.frequency||site?.frequencies?.[0]?.frequency||channel?.frequency;if(frequency)$('#digital-frequency-input').value=formatMHz(frequency);}
   $('#digital-engine-badge').textContent = external ? 'EXTERNAL ENGINE' : 'INTEGRATED · PREVIEW';
-  $('#digital-toggle').textContent = trunkScan ? 'Control scan active' : state.digitalBusy ? 'Please wait…' : active ? 'Stop decoder' : 'Start decoder';
+  $('#digital-toggle').textContent = trunkScan ? 'Control scan active' : state.digitalBusy ? 'Please wait…' : active ? state.status?.digitalLiveWfm ? 'Stop Live WFM' : 'Stop decoder' : 'Start decoder';
   $('#digital-toggle').disabled = trunkScan || state.digitalBusy || !active && !external && runtime?.available === false;
   $('#digital-add-memory').disabled=Boolean(state.digitalBusy||state.status?.digitalStarting);
   $('#save-current-memory').disabled=Boolean(state.digitalBusy||state.status?.digitalStarting);
@@ -433,7 +434,8 @@ async function startListening() {
 }
 async function stopDigital() {
   if(!isDigitalActive()&&!state.status?.digitalStarting)return;
-  try { state.status=await api('/api/digital/stop',{});await stopAudio();renderStatus();toast('Digital decoder stopped.'); }
+  const liveWfm=Boolean(state.status?.digitalLiveWfm);
+  try { state.status=await api('/api/digital/stop',{});await stopAudio();renderStatus();toast(liveWfm?'Live Radio stopped.':'Digital decoder stopped.'); }
   catch(error){toast(error.message,'error');}
 }
 async function toggleDigital(protocol) {

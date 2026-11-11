@@ -55,6 +55,7 @@ let activeDigitalConfig = null;
 let digitalHistory = [];
 let lastDigitalBroadcast = 0;
 let digitalScan = null;
+let liveWfmActive = false;
 let wsjtSocket = null;
 let wsjtPort = null;
 let wsjtReady = false, wsjtStarting = false, wsjtGeneration = 0;
@@ -125,7 +126,7 @@ function status() {
     dataProfile: createHash('sha256').update(process.platform === 'win32' ? DATA_DIR.toLowerCase() : DATA_DIR).digest('hex').slice(0, 16),
     hdActive: Boolean(hdSession?.active), hdStarting, hd: hdSession?.snapshot() || lastHdState, hdFmFallback: settings.hdFmFallback !== false,
     digitalActive: Boolean(digitalProcess || digitalSession?.active), digitalStarting,
-    digital: digitalSession?.snapshot() || (digitalProcess ? { engine: 'external', phase: 'listening', config: activeDigitalConfig } : lastDigitalState), mode: appMode, frequency: activeFrequency, gain: activeGain,
+    digital: digitalSession?.snapshot() || (digitalProcess ? { engine: 'external', phase: 'listening', config: activeDigitalConfig } : lastDigitalState), digitalLiveWfm: liveWfmActive, mode: appMode, frequency: activeFrequency, gain: activeGain,
     sampleRate, rtlInfo: hdSession?.active ? hdSession.usb?.info || null : rtlInfo, selectedChannelId, scannerActive: Boolean(scan?.active), scan, wsjtActive: wsjtReady,
     wsjtPort, recentDecodes: recentDecodes.slice(-50), host: os.hostname(),
     usb: receiver?.connected ? { bytes: receiver.bytes, streamingSince: receiver.startedAt, deviceIndex: rtlInfo?.index, serial: rtlInfo?.serial } : null
@@ -139,6 +140,12 @@ async function tune(freq) {
   const next = validFrequency(freq);
   if (hdStarting) throw new Error('Wait for HD Radio to finish starting.');
   if (trunkedScanner?.active) throw new Error('Stop the trunked site scan before tuning manually.');
+  if (liveWfmActive) {
+    if (next === activeFrequency) return;
+    await stopDigital();
+    await startLiveWfm(next);
+    return;
+  }
   if (hdSession?.active) { await startHd({ frequency: next, program: hdSession.program }); return; }
   if (digitalSession?.active) {
     if (digitalScan) throw new Error('Stop the digital memory scan before tuning manually.');
@@ -327,6 +334,11 @@ function processIq(buffer) {
 async function startReceiver(body = {}) {
   if (body.mode === 'HD') return startHd(body);
   if (hdStarting) throw new Error('Wait for HD Radio to finish starting.');
+  if (body.mode === 'WFM' && settings.digitalEngine !== 'external' && digitalRuntime().available
+      && !body.scanMemories && !body.keepScan && !body.hybridScan) {
+    await startLiveWfm(body.frequency ?? activeFrequency);
+    return status();
+  }
   if (digitalProcess || digitalSession?.active || digitalStarting) throw new Error('Stop the digital decoder before opening the USB receiver.');
   await stopHd();
   if (!body.keepScan) stopScan();
@@ -872,6 +884,7 @@ async function stopDigital({ keepTrunkedScan = false } = {}) {
     scan.timer = null;
   }
   digitalGeneration++;
+  liveWfmActive = false;
   const session = digitalSession;
   if (session) {
     await session.stop();
@@ -950,8 +963,17 @@ async function startDigital(body) {
   const generation = ++digitalGeneration;
   try { return await launchDigital(body, generation); } finally { digitalStarting = false; broadcast({ type: 'status', status: status() }); }
 }
+function liveWfmPlan(frequency) {
+  const channel = { id: 'live-wfm', name: 'Live Radio WFM', frequency: validFrequency(frequency), mode: 'WFM', kind: 'conventional', enabled: true };
+  return { engine: 'dsd', channels: [channel], rapid: false, dwellMs: 2500, channelIds: [channel.id] };
+}
+async function startLiveWfm(frequency) {
+  await startDigital({ scanMemories: true, scanPlan: liveWfmPlan(frequency), liveWfm: true });
+  return status();
+}
 async function launchDigital(body, generation) {
   const integrated = settings.digitalEngine !== 'external';
+  const liveWfm = body.liveWfm === true;
   if (integrated && !digitalRuntime().available) throw new Error('The bundled digital decoder is unavailable. Restore the native/digital application files.');
   const binary = String(body.path || settings.dsdPath || '').trim();
   const trunked = body.channelId ? channels.find(c => c.id === body.channelId && c.kind === 'trunked') : null;
@@ -968,6 +990,8 @@ async function launchDigital(body, generation) {
   const protocol = config.mode;
   const decoderLabel = plan?.engine === 'dsd' ? 'DSD-neo mixed-mode scan' : protocolLabel(config);
   const freq = validFrequency(plan ? plan.channels[0].frequency : trunked ? (body.controlFrequency || selectedSite.frequencies.find(f => f.use === 'd')?.frequency || selectedSite.frequencies[0]?.frequency || trunked.frequency) : memory?.frequency || body.frequency || activeFrequency);
+  if (liveWfm && (plan?.engine !== 'dsd' || plan.channels.length !== 1 || plan.channels[0].mode !== 'WFM')) throw new Error('Live Radio WFM needs a single WFM DSD-neo channel.');
+  if (liveWfm) { appMode = 'WFM'; activeFrequency = freq; selectedChannelId = null; digitalScan = null; liveWfmActive = false; }
   const flags = plan?.engine === 'dsd' ? [] : plan?.profile.flags || decoderFlags(config, { trunked: Boolean(trunked) });
   let deviceIndex = Number(settings.deviceIndex) || 0;
   if (integrated && settings.deviceSerial) {
@@ -1020,9 +1044,10 @@ async function launchDigital(body, generation) {
     const inputAudioChannels = firstAnalog ? 1 : decoderChannels;
     const inputAudioRateHz = firstAnalog ? 48000 : 8000;
     activeDigitalConfig = { mode: protocol, ...digitalOptions(config) };
+    if (liveWfm) liveWfmActive = true;
     const session = new DigitalDecoder({ args, channels: inputAudioChannels, inputRateHz: inputAudioRateHz, dataDir: path.join(DATA_DIR, 'digital'), protocol: decoderLabel, config: activeDigitalConfig, frequency: freq });
     digitalSession = session; digitalHistory = []; lastDigitalBroadcast = 0;
-    activeFrequency = freq; appMode = protocol; selectedChannelId = trunked?.id || memory?.id || null;
+    activeFrequency = freq; appMode = liveWfm ? 'WFM' : protocol; selectedChannelId = liveWfm ? null : trunked?.id || memory?.id || null;
     session.on('audio', ({ samples, level }) => {
       if (digitalSession !== session) return;
       const frame = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
@@ -1099,7 +1124,7 @@ async function launchDigital(body, generation) {
     });
     session.on('failure', error => {
       if (digitalSession !== session) return;
-      digitalScan = null;
+      digitalScan = null; liveWfmActive = false;
       if (trunkedScanner?.active) { void stopTrunkedScan({ error: error.message, stopDecoder: false }); return; }
       broadcast({ type: 'digital-error', message: error.message });
       broadcast({ type: 'status', status: status() });
@@ -1108,12 +1133,13 @@ async function launchDigital(body, generation) {
     try {
       await session.start();
       if (generation !== digitalGeneration) { await session.stop(); throw new Error('Decoder start cancelled.'); }
-      if (plan) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, paused: false, channel: plan.channels[0], hops: 0 };
+      if (plan && !liveWfm) digitalScan = { active: true, engine: plan.engine, rapid: plan.rapid, dwellMs: plan.engine === 'dsd' ? plan.dwellMs : plan.rapid ? 0 : 1000, channelIds: plan.channelIds, channelCount: plan.channels.length, holding: false, paused: false, channel: plan.channels[0], hops: 0 };
+      if (liveWfm) { appMode = 'WFM'; activeFrequency = freq; liveWfmActive = true; digitalScan = null; }
       broadcast({ type: 'status', status: status() });
       return { active: true, engine: 'integrated', protocol, protocolLabel: decoderLabel, frequency: activeFrequency,
         channel: trunked?.name || null, site: selectedSite?.name || null, scanning: scanningCount || null, scan: digitalScan, digital: session.snapshot() };
     } catch (error) {
-      digitalScan = null; lastDigitalState = session.snapshot();
+      digitalScan = null; liveWfmActive = false; lastDigitalState = session.snapshot();
       if (digitalSession === session) digitalSession = null;
       throw new Error(`Integrated decoder: ${error.message}`);
     }
@@ -1197,7 +1223,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/rtl/devices' && req.method === 'GET') return sendJson(res, 200, await listUsbDevices(settings.rtlLibraryPath));
     if (url.pathname === '/api/rtl/start' && req.method === 'POST') return sendJson(res, 200, await startReceiver(await parseBody(req)));
-    if (url.pathname === '/api/rtl/stop' && req.method === 'POST') { stopScan(); await stopReceiver(); return sendJson(res, 200, status()); }
+    if (url.pathname === '/api/rtl/stop' && req.method === 'POST') {
+      if (liveWfmActive) await stopDigital();
+      else { stopScan(); await stopReceiver(); }
+      return sendJson(res, 200, status());
+    }
     if (url.pathname === '/api/tune' && req.method === 'POST') { const b = await parseBody(req); if (scanner?.active) stopScan(); await tune(b.frequency); return sendJson(res, 200, status()); }
     if (url.pathname === '/api/mode' && req.method === 'POST') {
       const b = await parseBody(req); if (!MODES.has(b.mode)) throw new Error('Unsupported demodulation mode.');
@@ -1207,6 +1237,12 @@ const server = http.createServer(async (req, res) => {
       if (hdSession?.active && b.mode !== 'HD') {
         if (DIGITAL_MODES.has(b.mode)) throw new Error('Stop HD Radio before starting a digital voice decoder.');
         await stopHd(); return sendJson(res, 200, await startReceiver({ frequency: activeFrequency, mode: b.mode, gain: settings.tunerGain }));
+      }
+      if (receiver?.connected && b.mode === 'WFM' && settings.digitalEngine !== 'external' && digitalRuntime().available) {
+        const frequency = activeFrequency;
+        await stopReceiver();
+        await startLiveWfm(frequency);
+        return sendJson(res, 200, status());
       }
       if (scanner?.active) stopScan(); appMode = b.mode; resetDsp(); broadcast({ type: 'status', status: status() }); return sendJson(res, 200, status());
     }
