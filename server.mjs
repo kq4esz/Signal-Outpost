@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { UsbReceiver, listUsbDevices, rtlLibraryPath } from './lib/rtl-usb.mjs';
 import { KiwiDirectory } from './lib/kiwi-directory.mjs';
@@ -63,6 +64,7 @@ let appMode = 'NFM';
 let activeFrequency = 100000000;
 let activeGain = 0;
 let sampleRate = 2400000;
+let wfmWorker = null, wfmPendingBytes = 0, wfmGeneration = 0;
 let rtlInfo = null;
 let lastSpectrumAt = 0;
 let spectrumRefreshCounter = 0;
@@ -150,10 +152,17 @@ async function tune(freq) {
 
 let phaseI = 1, phaseQ = 0, previousI = 0, previousQ = 0, havePrevious = false;
 let decimationCount = 0, audioAccumulator = 0, audioSamples = [], spectrumI = new Float32Array(1024), spectrumQ = new Float32Array(1024), spectrumCount = 0;
-let dcInput = 0, dcOutput = 0, wfmDeemphasis = 0, rmsSum = 0, rmsCount = 0;
+let dcInput = 0, dcOutput = 0, rmsSum = 0, rmsCount = 0;
 function resetDsp() {
   phaseI = 1; phaseQ = 0; previousI = 0; previousQ = 0; havePrevious = false;
-  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0; wfmDeemphasis = 0;
+  decimationCount = 0; audioAccumulator = 0; audioSamples = []; spectrumCount = 0; rmsSum = 0; rmsCount = 0; dcInput = 0; dcOutput = 0;
+  wfmGeneration++;
+  if (wfmWorker) {
+    if (appMode === 'WFM' && receiver) wfmWorker.postMessage({ rate: sampleRate, generation: wfmGeneration });
+    else {
+      const worker = wfmWorker; wfmWorker = null; wfmPendingBytes = 0; void worker.terminate();
+    }
+  }
   spectrumRefreshCounter = 0;
   cwState = { unit: 100, keyed: false, markMs: 0, gapMs: 0, pattern: '', text: '', noise: 0.008, peak: 0.04, envelope: 0 };
 }
@@ -235,13 +244,62 @@ function publishSpectrum() {
   if (scanner?.active) scanner.observe(spectrumSnr(bins, sampleRate, appMode));
   spectrumCount = 0;
 }
+function flushAudio() {
+  if (audioSamples.length < 4800) return;
+  const chunk = Float32Array.from(audioSamples.splice(0, 4800));
+  const audible = !scanner?.active || scanner.holding || !scanner.plan.holdOnSignal;
+  if (audible) decodeCw(chunk);
+  const frame = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  if (audible) for (const client of clients) if (!client.destroyed) sendBinary(client, frame);
+  const outputRate = appMode === 'WFM' ? 48000 : sampleRate / Math.max(1, Math.round(sampleRate / 48000));
+  broadcast({ type: 'meter', level: audible && rmsCount ? Math.sqrt(rmsSum / rmsCount) : 0, sampleRate: outputRate });
+  rmsSum = 0; rmsCount = 0;
+}
+function startWfmWorker() {
+  let worker;
+  try { worker = new Worker(new URL('./lib/hd-fm-worker.mjs', import.meta.url), { workerData: { rate: sampleRate } }); }
+  catch (error) { broadcast({ type: 'log', source: 'Live WFM', message: `Could not start WFM audio processing: ${error.message}` }); return null; }
+  wfmWorker = worker; wfmPendingBytes = 0;
+  worker.on('message', message => {
+    if (wfmWorker !== worker) return;
+    wfmPendingBytes = Math.max(0, wfmPendingBytes - message.consumed);
+    if (message.generation !== wfmGeneration) return;
+    const samples = new Float32Array(message.samples, 0, message.length);
+    for (let i = 0; i < samples.length; i++) {
+      const audio = samples[i]; audioSamples.push(audio); rmsSum += audio * audio; rmsCount++;
+    }
+    flushAudio();
+  });
+  worker.on('error', error => {
+    if (wfmWorker !== worker) return;
+    wfmWorker = null; wfmPendingBytes = 0;
+    broadcast({ type: 'log', source: 'Live WFM', message: `WFM audio processing failed: ${error.message}` });
+  });
+  worker.on('exit', code => {
+    if (wfmWorker !== worker) return;
+    wfmWorker = null; wfmPendingBytes = 0;
+    if (code) broadcast({ type: 'log', source: 'Live WFM', message: `WFM audio processor stopped (${code}).` });
+  });
+  return worker;
+}
 function processIq(buffer) {
   if (!receiver) return;
   const factor = Math.max(1, Math.round(sampleRate / 48000));
   const outRate = sampleRate / factor;
-  const fmDeviationHz = appMode === 'WFM' ? 75000 : appMode === 'NFM' ? 5000 : 0;
+  const wideFm = appMode === 'WFM';
+  if (wideFm) {
+    const worker = wfmWorker || startWfmWorker();
+    if (worker) {
+      const copy = Uint8Array.from(buffer);
+      wfmPendingBytes += copy.byteLength;
+      if (wfmPendingBytes > 8 * 1024 * 1024) {
+        wfmWorker = null; wfmPendingBytes = 0; void worker.terminate();
+        broadcast({ type: 'log', source: 'Live WFM', message: 'WFM audio processing fell behind the USB stream. Restart listening and check system load.' });
+      } else worker.postMessage({ iq: copy.buffer, generation: wfmGeneration }, [copy.buffer]);
+    }
+  }
+  const fmDeviationHz = appMode === 'NFM' ? 5000 : 0;
   const fmAudioScale = fmDeviationHz ? 0.72 * sampleRate / (2 * Math.PI * fmDeviationHz) : 0.7;
-  const wfmDeemphasisAlpha = appMode === 'WFM' ? Math.exp(-1 / (outRate * 75e-6)) : 0;
   const mix = ['USB', 'LSB', 'CW'].includes(appMode);
   const mixFrequency = appMode === 'CW' ? 700 : 1500;
   const direction = appMode === 'LSB' ? 1 : -1;
@@ -253,7 +311,9 @@ function processIq(buffer) {
     const rawI = (buffer[p] - 127.5) / 127.5, rawQ = (buffer[p + 1] - 127.5) / 127.5;
     if (spectrumCount < spectrumI.length) { spectrumI[spectrumCount] = rawI; spectrumQ[spectrumCount] = rawQ; spectrumCount++; }
     let sample;
-    if (appMode === 'AM') {
+    if (wideFm) {
+      sample = 0;
+    } else if (appMode === 'AM') {
       const envelope = Math.hypot(rawI, rawQ);
       const y = envelope - dcInput + 0.996 * dcOutput;
       dcInput = envelope; dcOutput = y; sample = y * 4;
@@ -273,18 +333,15 @@ function processIq(buffer) {
       localPhaseQ = localPhaseI * stepQ + localPhaseQ * stepI;
       localPhaseI = nextI;
     } else sample = 0;
-    audioAccumulator += sample;
-    decimationCount++;
-    if (decimationCount >= factor) {
-      let audio = audioAccumulator / factor;
-      if (appMode === 'WFM') {
-        audio = audio * (1 - wfmDeemphasisAlpha) + wfmDeemphasis * wfmDeemphasisAlpha;
-        wfmDeemphasis = audio;
+    if (!wideFm) {
+      audioAccumulator += sample;
+      decimationCount++;
+      if (decimationCount >= factor) {
+        const audio = Math.max(-1, Math.min(1, audioAccumulator / factor));
+        output.push(audio);
+        rmsSum += audio * audio; rmsCount++;
+        audioAccumulator = 0; decimationCount = 0;
       }
-      audio = Math.max(-1, Math.min(1, audio));
-      output.push(audio);
-      rmsSum += audio * audio; rmsCount++;
-      audioAccumulator = 0; decimationCount = 0;
     }
     if (spectrumCount >= spectrumI.length && ++spectrumRefreshCounter >= 8192) {
       spectrumRefreshCounter = 0;
@@ -293,15 +350,7 @@ function processIq(buffer) {
     }
   }
   phaseI = localPhaseI; phaseQ = localPhaseQ;
-  if (output.length >= 4800) {
-    const chunk = Float32Array.from(output.splice(0, 4800));
-    const audible = !scanner?.active || scanner.holding || !scanner.plan.holdOnSignal;
-    if (audible) decodeCw(chunk);
-    const frame = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    if (audible) for (const client of clients) if (!client.destroyed) sendBinary(client, frame);
-    broadcast({ type: 'meter', level: audible && rmsCount ? Math.sqrt(rmsSum / rmsCount) : 0, sampleRate: outRate });
-    rmsSum = 0; rmsCount = 0;
-  }
+  flushAudio();
 }
 
 async function startReceiver(body = {}) {
