@@ -1325,6 +1325,21 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/radioreference/import' && req.method === 'POST') return sendJson(res, 201, await importRadioReference(await parseBody(req)));
     if (url.pathname === '/api/digital/start' && req.method === 'POST') return sendJson(res, 200, await startDigital(await parseBody(req)));
     if (url.pathname === '/api/digital/stop' && req.method === 'POST') { await stopDigital(); return sendJson(res, 200, status()); }
+    if (url.pathname === '/api/digital/iq-recording/start' && req.method === 'POST') {
+      if (!digitalSession?.active || digitalSession.phase !== 'listening') throw new Error('Start the integrated decoder before recording IQ.');
+      if (digitalScan?.active || trunkedScanner?.active || digitalSession.telemetry.status?.trunking) {
+        throw new Error('Stop scanning or trunked monitoring before recording IQ.');
+      }
+      const recording = await digitalSession.startIqRecording(path.join(DATA_DIR, 'digital', 'recordings'));
+      broadcast({ type: 'status', status: status() });
+      return sendJson(res, 200, { recording, status: status() });
+    }
+    if (url.pathname === '/api/digital/iq-recording/stop' && req.method === 'POST') {
+      if (!digitalSession?.active || digitalSession.phase !== 'listening') throw new Error('The integrated decoder is not running.');
+      const recording = await digitalSession.stopIqRecording();
+      broadcast({ type: 'status', status: status() });
+      return sendJson(res, 200, { recording, status: status() });
+    }
     if (url.pathname === '/api/digital/control' && req.method === 'POST') {
       if (!digitalSession?.active || digitalSession.phase !== 'listening') throw new Error('Start the integrated decoder first.');
       const b = await parseBody(req);

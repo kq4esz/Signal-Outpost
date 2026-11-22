@@ -144,6 +144,25 @@ function renderDigital() {
   else if (state.digitalBusy || digital?.phase === 'starting') label = 'Opening the USB receiver and decoder…';
   else if (active) label = external ? 'External DSD-FME running · Audio is managed by that engine.' : `${digital.protocol || 'Digital voice'} · ${digital.decoderStatus?.protocol && digital.decoderStatus.protocol !== 'None' ? 'Receiving ' + digital.decoderStatus.protocol : 'Listening for valid frames'} · Audio in Signal Outpost`;
   output.querySelector('span').textContent = label;
+  const iqRecording = digital?.iqRecording || { active: false, bytes: 0, limitBytes: 2 * 1024 * 1024 * 1024 };
+  const iqScanBlocked = Boolean(state.status?.scannerActive || state.status?.scan?.active || digital?.decoderStatus?.trunking);
+  const iqButton = $('#digital-iq-record');
+  iqButton.textContent = iqRecording.active ? '■ Stop recording' : '● Record IQ';
+  iqButton.setAttribute('aria-pressed', String(Boolean(iqRecording.active)));
+  iqButton.disabled = Boolean(state.digitalBusy || !integrated || !active || digital?.phase !== 'listening' || !iqRecording.active && iqScanBlocked);
+  iqButton.title = iqRecording.active ? 'Stop and finalize this IQ recording' : iqScanBlocked ? 'Stop scanning or trunked monitoring before recording IQ' : 'Record raw CU8 receiver IQ for later replay with DSD-neo';
+  const iqFolder = $('#digital-iq-folder');
+  iqFolder.disabled = !window.sdrDesktop?.openIqRecordings;
+  const iqNote = $('#digital-iq-note');
+  iqNote.classList.toggle('error', Boolean(iqRecording.error));
+  if (iqRecording.active) {
+    const rate = Number(iqRecording.sampleRateHz) || 1_536_000;
+    const mibPerMinute = rate * 2 * 60 / (1024 * 1024);
+    iqNote.textContent = `Recording ${iqRecording.fileName || 'IQ capture'} · ${(iqRecording.bytes / (1024 * 1024)).toFixed(1)} MiB · about ${mibPerMinute.toFixed(0)} MiB/min`;
+  } else if (iqRecording.error) iqNote.textContent = `Capture stopped with an error: ${iqRecording.error}`;
+  else if (iqRecording.fileName) iqNote.textContent = `${iqRecording.sizeLimitReached ? '2 GiB limit reached · ' : 'Saved · '}${iqRecording.fileName} · ${(iqRecording.bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  else if (iqScanBlocked) iqNote.textContent = 'Stop scanning or trunked monitoring to record one tuned frequency.';
+  else iqNote.textContent = 'Raw receiver IQ · DSD-neo replay file · 2 GiB maximum per capture.';
   $('#digital-runtime-label').textContent = runtime ? `Bundled ${runtime.name} ${runtime.version} · ${runtime.codec}` : 'Bundled DSD-neo · IMBE / AMBE codec included';
   $('#digital-runtime-status').textContent = runtime?.available ? `${runtime.name} ${runtime.version} · Preview build · Ready` : 'Bundled digital decoder is unavailable in this package.';
   $('#digital-runtime-status').classList.toggle('unavailable', !runtime?.available);
@@ -435,7 +454,7 @@ async function startListening() {
 async function stopDigital() {
   if(!isDigitalActive()&&!state.status?.digitalStarting)return;
   const liveWfm=Boolean(state.status?.digitalLiveWfm);
-  try { state.status=await api('/api/digital/stop',{});await stopAudio();renderStatus();toast(liveWfm?'Live Radio stopped.':'Digital decoder stopped.'); }
+  try { state.status=await api('/api/digital/stop',{});await stopAudio();renderStatus();const capture=state.status?.digital?.iqRecording;toast(capture?.fileName?`${liveWfm?'Live Radio stopped.':'Digital decoder stopped.'} IQ saved: ${capture.fileName}`:liveWfm?'Live Radio stopped.':'Digital decoder stopped.'); }
   catch(error){toast(error.message,'error');}
 }
 async function toggleDigital(protocol) {
@@ -451,6 +470,19 @@ async function toggleDigital(protocol) {
     state.spectrum=null;renderStatus();toast(`${result.protocolLabel || result.protocol} decoder listening.`,'success');
   }catch(error){toast(error.message,'error');await refreshState().catch(()=>{});}
   finally{state.digitalBusy=false;renderDigital();}
+}
+async function toggleIqRecording() {
+  const recording = Boolean(state.status?.digital?.iqRecording?.active);
+  const button = $('#digital-iq-record'); button.disabled = true;
+  try {
+    const result = await api(`/api/digital/iq-recording/${recording ? 'stop' : 'start'}`, {});
+    state.status = result.status;
+    renderStatus();
+    if (result.recording.active) toast(`IQ recording started: ${result.recording.fileName}`, 'success');
+    else if (result.recording.error) toast(`IQ recording stopped with an error: ${result.recording.error}`, 'error');
+    else if (result.recording.fileName) toast(`IQ recording saved: ${result.recording.fileName}`, 'success');
+  } catch (error) { toast(error.message, 'error'); }
+  finally { renderDigital(); }
 }
 async function tuneFromInput() {
   const freq=Math.round(Number($('#frequency-input').value)*1e6);
@@ -1039,6 +1071,8 @@ function bindEvents() {
   $('#digital-site').addEventListener('change',renderDigital);
   $('#rr-import-kind').addEventListener('change',event=>{const conventional=event.target.value==='conventional';$('#rr-system-field').classList.toggle('hidden',conventional);$('#rr-zip-field').classList.toggle('hidden',!conventional);$('#rr-system-id').required=!conventional;$('#rr-system-id').disabled=conventional;$('#rr-zip').required=conventional;$('#rr-zip').disabled=!conventional;$('#rr-submit').textContent=conventional?'Import frequencies':'Import system';});
   $('#digital-toggle').addEventListener('click',()=>toggleDigital());
+  $('#digital-iq-record').addEventListener('click',toggleIqRecording);
+  $('#digital-iq-folder').addEventListener('click',async()=>{try{await window.sdrDesktop?.openIqRecordings();}catch(error){toast(error.message,'error');}});
   $('#digital-clear-events').addEventListener('click',()=>{state.digitalEvents=[];renderDigitalEvents();});
   $('#digital-engine').addEventListener('change',event=>$('#external-decoder-fields').classList.toggle('hidden',event.target.value!=='external'));
   $('#digital-slot').addEventListener('change',async event=>{try{await api('/api/digital/control',{action:'slot',value:Number(event.target.value)});}catch(error){toast(error.message,'error');}});

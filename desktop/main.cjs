@@ -109,6 +109,15 @@ ipcMain.handle('sdr:choose-library', async event => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('sdr:open-iq-recordings', async event => {
+  if (!trusted(event)) throw new Error('Unavailable outside the Signal Outpost window.');
+  const folder = path.join(DATA_DIR, 'digital', 'recordings');
+  fs.mkdirSync(folder, { recursive: true });
+  const error = await shell.openPath(folder);
+  if (error) throw new Error(error);
+  return true;
+});
+
 async function stopBackend() {
   if (!backendActive) return;
   if (shutdownPromise) return shutdownPromise;
