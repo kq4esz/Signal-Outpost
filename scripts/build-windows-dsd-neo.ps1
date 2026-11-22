@@ -32,6 +32,7 @@ $stageBin = Join-Path $buildRoot 'runtime/bin'
 New-Item -ItemType Directory -Path $sourceArchiveRoot,$stageBin -Force | Out-Null
 
 try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $sourceArchiveRoot)
     $source = Get-ChildItem -LiteralPath $sourceArchiveRoot -Directory | Select-Object -First 1 -ExpandProperty FullName
     if (-not $source) { throw 'The pinned DSD-neo source archive did not contain a source directory.' }
